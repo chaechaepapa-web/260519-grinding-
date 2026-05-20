@@ -573,7 +573,7 @@ const App = () => {
       if (selectedMenu === 'dress_rotary') return [{ id: 'geometry', label: '로터리 드레싱 설정' }, { id: 'cutting', label: '로터리 드레싱 조건' }];
       if (isDressingMode) return [{ id: 'geometry', label: '드레싱 설정' }, { id: 'cutting', label: '드레싱 조건' }];
       
-      if (selectedMenu !== 'face_plunge' && selectedMenu !== 'face_traverse') {
+      if (selectedMenu !== 'face_traverse') {
         return [
           { id: 'geometry', label: '공작물 형상' }, 
           { id: 'cutting', label: '가공 조건' },
@@ -1326,42 +1326,61 @@ const App = () => {
                       })}
                       
                       {/* 가공 좌표 계산 결과 요약 (Plunge 전용) */}
-                      {(selectedMenu === 'od_plunge' || selectedMenu === 'id_plunge') && activeTab === 'geometry' && (
-                        <div className="mt-2 p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 shadow-sm border-l-4 border-l-blue-500">
-                          <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
-                            <div className="flex items-center text-blue-600">
-                              <Activity size={14} className="mr-1.5" /> 
-                              가공 점 좌표 요약 (Point Coordinates)
+                      {(selectedMenu === 'od_plunge' || selectedMenu === 'id_plunge' || selectedMenu === 'face_plunge') && activeTab === 'geometry' && (() => {
+                        let startX = '50.000';
+                        let startZ = '100.000';
+                        let endX = '48.500';
+                        let endZ = '75.000';
+
+                        if (selectedMenu === 'id_plunge') {
+                          startX = '48.500';
+                          startZ = '100.000';
+                          endX = '50.000';
+                          endZ = '125.000';
+                        } else if (selectedMenu === 'face_plunge') {
+                          startX = '50.000';
+                          startZ = '100.000';
+                          endX = '50.000';
+                          endZ = '98.500';
+                        }
+
+                        return (
+                          <div className="mt-2 p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 shadow-sm border-l-4 border-l-blue-500">
+                            <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
+                              <div className="flex items-center text-blue-600">
+                                <Activity size={14} className="mr-1.5" /> 
+                                가공 점 좌표 요약 (Point Coordinates)
+                              </div>
+                              <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-mono">Calculated</span>
                             </div>
-                            <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-mono">Calculated</span>
-                          </div>
-                          <div className="grid grid-cols-2 gap-6">
-                            <div className="flex flex-col">
-                              <div className="flex items-center space-x-1 mb-1">
-                                <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                                <span className="text-[10px] text-slate-400 font-bold uppercase">시작 좌표 (P1)</span>
+                            <div className="grid grid-cols-2 gap-6">
+                              <div className="flex flex-col">
+                                <div className="flex items-center space-x-1 mb-1">
+                                  <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase">시작 좌표 (P1)</span>
+                                </div>
+                                <div className="flex flex-col pl-3 border-l border-slate-200">
+                                  <span className="text-xs font-mono font-bold text-slate-700"><span className="text-slate-400 mr-1">X:</span>{startX}</span>
+                                  <span className="text-xs font-mono font-bold text-slate-700"><span className="text-slate-400 mr-1">Z:</span>{startZ}</span>
+                                </div>
                               </div>
-                              <div className="flex flex-col pl-3 border-l border-slate-200">
-                                <span className="text-xs font-mono font-bold text-slate-700"><span className="text-slate-400 mr-1">X:</span>{selectedMenu === 'od_plunge' ? '50.000' : '48.500'}</span>
-                                <span className="text-xs font-mono font-bold text-slate-700"><span className="text-slate-400 mr-1">Z:</span>100.000</span>
+                              <div className="flex flex-col">
+                                <div className="flex items-center space-x-1 mb-1">
+                                  <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase">종료 좌표 (P2)</span>
+                                </div>
+                                <div className="flex flex-col pl-3 border-l border-slate-200">
+                                  <span className="text-xs font-mono font-bold text-slate-700"><span className="text-slate-400 mr-1">X:</span>{endX}</span>
+                                  <span className="text-xs font-mono font-bold text-slate-700"><span className="text-slate-400 mr-1">Z:</span>{endZ}</span>
+                                </div>
                               </div>
                             </div>
-                            <div className="flex flex-col">
-                              <div className="flex items-center space-x-1 mb-1">
-                                <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                                <span className="text-[10px] text-slate-400 font-bold uppercase">종료 좌표 (P2)</span>
-                              </div>
-                              <div className="flex flex-col pl-3 border-l border-slate-200">
-                                <span className="text-xs font-mono font-bold text-slate-700"><span className="text-slate-400 mr-1">X:</span>{selectedMenu === 'od_plunge' ? '48.500' : '50.000'}</span>
-                                <span className="text-xs font-mono font-bold text-slate-700"><span className="text-slate-400 mr-1">Z:</span>75.000</span>
-                              </div>
+                            <div className="pt-2 border-t border-slate-100 text-[9px] text-slate-400 italic">
+                              * 입력된 직경(D) 및 Z축 시작/종료 위치를 기반으로 산출된 좌표입니다.
                             </div>
                           </div>
-                          <div className="pt-2 border-t border-slate-100 text-[9px] text-slate-400 italic">
-                            * 입력된 직경(D) 및 Z축 시작/종료 위치를 기반으로 산출된 좌표입니다.
-                          </div>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
