@@ -1,10 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { 
   Settings, Play, Save, ChevronRight, Info, AlertCircle, 
   Maximize2, FileText, Search, Plus, Trash2, Calendar, 
   ChevronLeft, MoreVertical, HardDrive, Clock, HelpCircle,
-  Disc, MoveDiagonal, ArrowDownToLine, Wrench, Crosshair, PenTool, Focus, ArrowLeftRight, Activity, RefreshCw
+  Disc, MoveDiagonal, ArrowDownToLine, Wrench, Crosshair, PenTool, Focus, ArrowLeftRight, Activity, RefreshCw,
+  ChevronUp, ChevronDown
 } from 'lucide-react';
+import { NcSimulator } from './components/Simulator';
+import { CycleDiagram } from './components/CycleDiagram';
 
 const INITIAL_PROJECTS = [
   { id: 1, name: 'OP_10_SHAFT', date: '2026-04-28 13:37:27', size: '1' },
@@ -20,12 +25,6 @@ const SETUP_TYPES = [
 const CYCLE_TYPES = [
   { id: 'od_plunge', label: '외경 연삭 (Plunge)', desc: 'Outer Diameter Plunge Cycle', icon: MoveDiagonal },
   { id: 'od_traverse', label: '외경 연삭 (Traverse)', desc: 'Outer Diameter Traverse Cycle', icon: ArrowLeftRight },
-  { id: 'id_plunge', label: '내경 연삭 (Plunge)', desc: 'Inner Diameter Plunge Cycle', icon: Disc },
-  { id: 'id_traverse', label: '내경 연삭 (Traverse)', desc: 'Inner Diameter Traverse Cycle', icon: ArrowLeftRight },
-  { id: 'face_plunge', label: '단면 연삭 (Plunge)', desc: 'Face / Shoulder Plunge Cycle', icon: ArrowDownToLine },
-  { id: 'face_traverse', label: '단면 연삭 (Traverse)', desc: 'Face / Shoulder Traverse Cycle', icon: ArrowLeftRight },
-  { id: 'dress_single', label: '드레싱 (싱글포인트)', desc: 'Fixed Single Point Dressing', icon: Wrench, isDress: true },
-  { id: 'dress_rotary', label: '드레싱 (로터리)', desc: 'Rotary Dresser Cycle', icon: RefreshCw, isDress: true }
 ];
 
 const ALL_MENUS = [...SETUP_TYPES, ...CYCLE_TYPES];
@@ -35,20 +34,19 @@ const App = () => {
   const [selectedProjectId, setSelectedProjectId] = useState(1);
   const [projects, setProjects] = useState(INITIAL_PROJECTS);
   
-  const [selectedMenu, setSelectedMenu] = useState('dress_rotary'); 
+  const [selectedMenu, setSelectedMenu] = useState('od_plunge');
   const [activeTab, setActiveTab] = useState('geometry'); 
   
   // 라디오 그룹용 상태 변수들
   const [offsetMode, setOffsetMode] = useState('x_plus');
   const [dressDirection, setDressDirection] = useState('horizontal'); 
-  const [gapSensor, setGapSensor] = useState('on'); 
+  const [gapSensor, setGapSensor] = useState('off'); // 갭검출 기능 미개발 → 기본 OFF
   const [measureMode, setMeasureMode] = useState('in_process'); 
 
   // 개발 미정 기능 ON/OFF 토글 상태
   const [useGauge, setUseGauge] = useState(false);
   const [useRotary, setUseRotary] = useState(false);
   const [useRotaryOrigin, setUseRotaryOrigin] = useState(false);
-  const [useGapReturn, setUseGapReturn] = useState(true);
 
   // 싱글 드레서 활성화 상태 (D1, D2)
   const [activeSingleDressers, setActiveSingleDressers] = useState({ d1: true, d2: true });
@@ -64,6 +62,17 @@ const App = () => {
   const [calcTargetField, setCalcTargetField] = useState<any>(null); // 어떤 필드에 결과값을 넣을지
   const [calcMode, setCalcMode] = useState('N'); // N, Vs, D 중 무엇을 구할지
   const [calcVals, setCalcVals] = useState({ N: '', Vs: '', D: '' });
+
+  // --- 신규: NC 생성 (사용자 입력 캡처 + 출력) ---
+  const [paramValues, setParamValues] = useState<any>({}); // `${selectedMenu}:${field.id}` -> 값
+  const [ncCode, setNcCode] = useState('');
+  const [showNc, setShowNc] = useState(false);
+  const [ncSim, setNcSim] = useState<any>(null);   // 시뮬레이션 경로 모델
+  const [showSim, setShowSim] = useState(false);
+  const [activeField, setActiveField] = useState(''); // 다이어그램 하이라이트용 (포커스/호버 필드)
+  const [showSetupPanel, setShowSetupPanel] = useState(false); // 셋업 요약칩 인라인 편집 패널
+  const [travUseMacro, setTravUseMacro] = useState(true); // 트래버스 출력: WHILE 매크로(true) / 명시적 전개(false)
+  const [plungePaths, setPlungePaths] = useState<number[]>([]); // 플런지 툴패스별 가공폭(Z−) 목록 (비어있으면 단일 플런지)
 
   const handleFieldChange = (id, newValue) => {
     if (activeTab === 'coord_work') {
@@ -116,6 +125,7 @@ const App = () => {
       }
       
       handleFieldChange(calcTargetField.id, finalValue);
+      setParamValues((prev: any) => ({ ...prev, [`${selectedMenu}:${calcTargetField.id}`]: finalValue }));
     }
     setShowCalculator(false);
   };
@@ -142,7 +152,6 @@ const App = () => {
   const [activeStages, setActiveStages] = useState({
     rough: true,
     finish: true,
-    fine: true,
     spark: true
   });
 
@@ -151,6 +160,8 @@ const App = () => {
 
   const goToEditor = (id) => {
     setSelectedProjectId(id);
+    setSelectedMenu('od_plunge');   // 사이클 우선: 바로 가공 사이클로 진입
+    setActiveTab('geometry');
     setView('editor');
   };
 
@@ -164,17 +175,20 @@ const App = () => {
 
   const handleMeasureWorkCoord = () => {
     setWorkCoordData({ z: '152.485', c: '0.000' });
+    setParamValues((prev: any) => ({ ...prev, 'work_coord:z_offset': '152.485', 'work_coord:c_offset': '0.000' }));
     triggerMeasureEffect();
   };
 
   const handleMeasureDresserCoord = () => {
     if (activeTab === 'coord_dresser_rotary') {
       setDresserRotaryCoordData({ x: '-298.115', z: '49.820' });
+      setParamValues((prev: any) => ({ ...prev, 'work_coord:x_offset': '-298.115', 'work_coord:z_offset': '49.820' }));
     } else {
-      setDresserCoordData({ 
+      setDresserCoordData({
         x1: '-250.485', z1: '15.220',
         x2: '-250.485', z2: '25.220' // 예시값
       });
+      setParamValues((prev: any) => ({ ...prev, 'work_coord:x1_offset': '-250.485', 'work_coord:z1_offset': '15.220', 'work_coord:x2_offset': '-250.485', 'work_coord:z2_offset': '25.220' }));
     }
     triggerMeasureEffect();
   };
@@ -266,6 +280,7 @@ const App = () => {
     const wheelSetupFields = [
       { id: 't_code', label: '공구 번호 (T-Code)', unit: 'T', value: '0101', desc: '연삭 휠의 툴 번호 및 보정 번호' },
       { id: 'wheel_od', label: '휠 외경 (Wheel OD)', unit: 'mm', value: '350.000', desc: '현재 장착된 휠의 실측 직경' },
+      { id: 'wheel_width', label: '휠 폭 (Wheel Width)', unit: 'mm', value: '20.000', desc: '연삭 휠의 유효 폭. 플런지 가공폭이 이 값을 넘으면 시프트 플런지로 분할됩니다.' },
       { id: 'offset_mode', label: '옵셋 기준 위치 (Offset Ref.)', type: 'radioGroup', options: [{val: 'x_plus', label: '외경 (X+)'}, {val: 'x_minus', label: '내경 (X-)'}, {val: 'center', label: '센터'}], desc: '가공 부위(외경/내경/센터)에 따른 공구 보정 기준점 설정' },
       { id: 'x_offset', label: 'X축 옵셋 (X Offset)', unit: 'mm', value: '0.000', desc: '선택된 기준점 기준 X축 보정량' },
       { id: 'z_offset', label: 'Z축 옵셋 (Z Offset)', unit: 'mm', value: '120.000', desc: '선택된 기준점 기준 Z축 보정량' }
@@ -287,28 +302,21 @@ const App = () => {
 
     // --- 공통: 어프로치 및 갭 검지 ---
     const gapCuttingFields = [
-      { id: 'gap_sensor', label: '갭 검출 센서 (Gap Sensor)', type: 'radioGroup', options: [{val: 'on', label: '사용 (ON)'}, {val: 'off', label: '미사용 (OFF)'}], desc: '진동 센서를 이용한 접촉(Gap) 자동 검지 기능 활성화' },
-      { id: 'gap_feed', label: '어프로치 이송 속도 (Approach Speed)', unit: 'mm/min', value: '50.0', desc: '센서 검출 전까지 휠이 다가가는 빠른 접근 속도' },
-      ...(useGapReturn ? [{ id: 'gap_return', label: '검지 후 후퇴 거리 (Return Dist.)', unit: 'mm', value: '0.050', desc: '공작물 접촉 감지 직후 휠이 안전하게 뒤로 물러나는 거리' }] : [])
+      { id: 'gap_sensor', label: '갭 검출/리턴 (Gap, 개발예정)', type: 'radioGroup', options: [{val: 'on', label: '사용 (ON)'}, {val: 'off', label: '미사용 (OFF)'}], desc: '접촉 자동검지 + 검지 후 후퇴를 하나로 묶은 기능. 개발 예정 → 기본 OFF.' },
+      ...(gapSensor === 'on' ? [
+        { id: 'gap_feed', label: '어프로치 이송 속도 (Approach Speed)', unit: 'mm/min', value: '50.0', desc: '센서 검출 전까지 휠이 다가가는 접근 속도' },
+        { id: 'gap_return', label: '검지 후 후퇴 거리 (Return Dist.)', unit: 'mm', value: '0.050', desc: '접촉 감지 직후 휠이 뒤로 물러나는 거리' },
+      ] : [])
     ];
 
-    // --- 실시간 측정 게이지 (In-Process Gauge) 파라미터 ---
-    const gaugeFields = [
-      { id: 'measure_mode', label: '측정 모드 (Measure Mode)', type: 'radioGroup', options: [{val: 'in_process', label: '실시간 (In-Process)'}, {val: 'post_process', label: '가공 후 (Post-Process)'}], desc: '가공 중에 실시간으로 치수를 제어할지, 끝난 후 검사만 할지 선택합니다.' },
-      { id: 'shift_1', label: '1단 시프트 (Rough -> Finish)', unit: 'mm', value: '0.100', desc: '황삭에서 정삭으로 전환되는 게이지 잔여 치수' },
-      { id: 'shift_2', label: '2단 시프트 (Finish -> Fine)', unit: 'mm', value: '0.020', desc: '정삭에서 미세정삭으로 전환되는 게이지 잔여 치수' },
-      { id: 'target_size', label: '최종 목표 치수 (Target Size)', unit: 'mm', value: '50.000', desc: '게이지가 이 치수에 도달하면 스파크아웃을 시작합니다.' },
-      { id: 'gauge_retract', label: '게이지 후퇴 위치 (Retract Pos.)', unit: 'mm', value: '150.000', desc: '가공 완료 후 게이지 헤드가 대피하는 X축 위치' }
-    ];
 
     // --- 외경 연삭 (플런지) ---
     const odPlungeGeometryFields = [
       { id: 'd1', label: '시작 직경 (Start Dia.)', unit: 'mm', value: '50.000', desc: '가공 전 소재의 직경 (도피/접근 기준점)' },
       { id: 'd2', label: '목표 직경 (Finish Dia.)', unit: 'mm', value: '48.500', desc: '가공 완료 후의 최종 목표 직경' },
-      { id: 'z_start', label: '가공 시작 위치 (Start Z)', unit: 'mm', value: '100.000', desc: 'Z축 방향 가공 시작 지점' },
-      { id: 'z_end', label: '가공 끝 위치 (End Z)', unit: 'mm', value: '75.000', desc: 'Z축 방향 가공 종료 지점' },
-      { id: 'width', label: '가공 폭 (Grind Width)', unit: 'mm', value: '25.000', desc: '플런지 연삭이 들어갈 폭 (Start - End)' },
-      { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '2.000', desc: '급속 이송이 끝나고 가공 이송이 시작되는 안전 도피량' }
+      { id: 'z_start', label: '가공 시작 위치 (Start Z)', unit: 'mm', value: '100.000', desc: '가공 시작 Z. 여기서 Z− 방향으로 가공길이만큼 진입.' },
+      { id: 'width', label: '가공 길이 (Grind Length, 부호=방향)', unit: 'mm', value: '-25.000', desc: '가공 시작점에서 진입하는 길이. 음수=Z−, 양수=Z+. 길이는 절대값으로 계산.' },
+      { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '0.300', desc: '급속이송이 끝나고 가공이송이 시작되는 접근 도피량(반경). 휠이 소재 위 이 거리에서 가공이송 시작.' }
     ];
 
     const odPlungeCuttingFields = [
@@ -317,19 +325,17 @@ const App = () => {
       { id: 'wheel_vc', label: '휠 주속 (Wheel Vc)', unit: 'm/s', value: '35', desc: '연마 휠의 표면 속도' },
       
       { id: 'toggle_rough', type: 'stageToggle', stageKey: 'rough', label: '황삭 가공 (Roughing)' },
-      { id: 'rough_stk', stage: 'rough', label: '황삭 절입량 (Rough Stock)', unit: 'mm', value: '1.000', desc: '황삭 구간의 총 가공량' },
+      { id: 'rough_offset', stage: 'rough', label: '황삭 옵셋 (목표직경 기준)', unit: 'mm', value: '0.400', desc: '목표직경 위로 남길 양(직경). 황삭은 d2+이 값까지, 나머지는 정삭이 목표직경까지.' },
       { id: 'rough_fr', stage: 'rough', label: '황삭 이송 속도 (Rough Feed)', unit: 'mm/min', value: '0.500', desc: '황삭 구간 휠 진입 속도' },
 
       { id: 'toggle_finish', type: 'stageToggle', stageKey: 'finish', label: '정삭 가공 (Finishing)' },
-      { id: 'finish_stk', stage: 'finish', label: '정삭 절입량 (Finish Stock)', unit: 'mm', value: '0.400', desc: '정삭 구간의 총 가공량' },
-      { id: 'finish_fr', stage: 'finish', label: '정삭 이송 속도 (Finish Feed)', unit: 'mm/min', value: '0.100', desc: '정삭 구간 휠 진입 속도' },
-
-      { id: 'toggle_fine', type: 'stageToggle', stageKey: 'fine', label: '미세정삭 가공 (Fine Finishing)' },
-      { id: 'fine_stk', stage: 'fine', label: '미세정삭 절입량 (Fine Stock)', unit: 'mm', value: '0.100', desc: '최종 치수 확보를 위한 미세 절입량' },
-      { id: 'fine_fr', stage: 'fine', label: '미세정삭 이송 (Fine Feed)', unit: 'mm/min', value: '0.020', desc: '미세정삭 구간 휠 진입 속도' },
+      { id: 'finish_fr', stage: 'finish', label: '정삭 이송 속도 (Finish Feed)', unit: 'mm/min', value: '0.100', desc: '정삭 구간 휠 진입 속도 (목표직경까지)' },
 
       { id: 'toggle_spark', type: 'stageToggle', stageKey: 'spark', label: '스파크 아웃 (Spark-out)' },
-      { id: 'spark_out', stage: 'spark', label: '스파크 아웃 횟수 (Spark-out)', unit: 'Times', value: '3', desc: '목표 치수 도달 후 절입 없이 회전하는 횟수 (표면 조도 향상)' }
+      { id: 'spark_out', stage: 'spark', label: '스파크 아웃 시간 (Dwell)', unit: 's', value: '3', desc: '목표 치수 도달 후 절입 없이 머무는 휴지 시간(초). G4 X로 출력.' },
+      { id: 'spark_osc_n', stage: 'spark', label: '스파크 왕복 횟수 (Oscillation)', unit: 'Times', value: '0', desc: '0=휴지만, 1이상=모든 정삭 완료 후 목표경에서 가공부 전구간(시작~끝)을 왕복. 미가공부 침범 없이 가공된 구간만 왕복합니다.' },
+      { id: 'spark_osc_overrun', stage: 'spark', label: '스파크 왕복 오버런 (편측)', unit: 'mm', value: '0.000', desc: '가공부 양 끝을 지나치는 추가 거리. 0=가공부 끝까지만 커버, 값↑=양 끝을 더 지나쳐 비빔(끝단 도피/단차 있을 때만 사용).' },
+      { id: 'spark_osc_feed', stage: 'spark', label: '스파크 왕복 이송 (Feed)', unit: 'mm/min', value: '200', desc: 'Z축 전구간 왕복 비비기 이송 속도.' }
     ];
 
     // --- 외경 연삭 (트래버스) ---
@@ -338,12 +344,13 @@ const App = () => {
       { id: 'd2', label: '목표 직경 (Finish Dia.)', unit: 'mm', value: '49.000', desc: '가공 완료 후의 최종 목표 직경' },
       { id: 'z_start', label: '가공 시작 위치 (Start Pos.)', unit: 'mm', value: '100.000', desc: '왕복(Traverse) 운동이 시작되는 Z축 지점' },
       { id: 'z_end', label: '가공 종료 위치 (End Pos.)', unit: 'mm', value: '50.000', desc: '왕복(Traverse) 운동이 끝나는 Z축 지점' },
-      { id: 'zigzag_angle', label: '지그재그 가공 각도 (Zigzag Angle)', unit: 'deg', value: '0.000', desc: '지그재그 왕복 가공 시 Z축 대비 기울기 각도 지정' },
+      { id: 'zigzag_angle', label: '지그재그(번개) 모드 ON (>0)', unit: 'deg', value: '0.000', desc: '0=직선 트래버스. >0=번개모드 ON. 번개에서는 한 레그가 전체 Z를 사선으로 트래버스하며 X-로 절입하므로, 실제 사선 기울기는 (절입량/2)/Z스팬으로 결정됩니다(이 값은 ON/OFF 용도).' },
+      { id: 'zigzag_infeed', label: '번개 X 1회 절입량 (직경)', unit: 'mm', value: '0.020', desc: '[번개모드 전용 · 각도>0일 때] 한 레그(전체 Z 사선 트래버스)마다 X-로 절입하는 직경량. Z 이동 중에 절입이 일어남. (직선모드의 시작/종료단 절입량을 대체)' },
       { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '2.000', desc: '가공 전 휠이 접근할 때의 도피량' },
       { id: 'over_start', label: '트래버스 오버런 (Start)', unit: 'mm', value: '15.000', desc: '시작 위치(Start Pos.)를 벗어나 휠이 더 나가는 거리' },
       { id: 'over_end', label: '트래버스 오버런 (End)', unit: 'mm', value: '15.000', desc: '종료 위치(End Pos.)를 벗어나 휠이 더 나가는 거리' },
-      { id: 'infeed_start', label: '시작단 절입량 (Infeed Start)', unit: 'mm', value: '0.005', desc: '시작 위치에서 방향을 바꿀 때 1회 절입되는 양' },
-      { id: 'infeed_end', label: '종료단 절입량 (Infeed End)', unit: 'mm', value: '0.000', desc: '종료 위치에서 방향을 바꿀 때 1회 절입되는 양' }
+      { id: 'infeed_start', label: '시작단 절입량 (Infeed Start)', unit: 'mm', value: '0.005', desc: '[직선 트래버스 전용 · 각도=0일 때] 시작 위치에서 방향을 바꿀 때 1회 절입되는 양. (번개모드에서는 미사용)' },
+      { id: 'infeed_end', label: '종료단 절입량 (Infeed End)', unit: 'mm', value: '0.000', desc: '[직선 트래버스 전용 · 각도=0일 때] 종료 위치에서 방향을 바꿀 때 1회 절입되는 양. (번개모드에서는 미사용)' }
     ];
 
     const odTraverseCuttingFields = [
@@ -352,268 +359,44 @@ const App = () => {
       { id: 'wheel_vc', label: '휠 주속 (Wheel Vc)', unit: 'm/s', value: '35', desc: '연마 휠의 표면 속도' },
 
       { id: 'toggle_rough', type: 'stageToggle', stageKey: 'rough', label: '황삭 가공 (Roughing)' },
-      { id: 'rough_stk', stage: 'rough', label: '황삭 절입량 (Rough Stock)', unit: 'mm', value: '0.500', desc: '트래버스 황삭 구간의 전체 가공량' },
+      { id: 'rough_offset', stage: 'rough', label: '황삭 옵셋 (목표직경 기준)', unit: 'mm', value: '0.300', desc: '목표직경 위로 남길 양(직경). 황삭은 d2+이 값까지, 나머지는 정삭이 목표직경까지.' },
       { id: 'rough_fr', stage: 'rough', label: '황삭 이송 속도 (Rough Feed)', unit: 'mm/min', value: '300', desc: 'Z축 좌우 왕복 이송 속도 (황삭)' },
 
       { id: 'toggle_finish', type: 'stageToggle', stageKey: 'finish', label: '정삭 가공 (Finishing)' },
-      { id: 'finish_stk', stage: 'finish', label: '정삭 절입량 (Finish Stock)', unit: 'mm', value: '0.300', desc: '트래버스 정삭 구간의 전체 가공량' },
-      { id: 'finish_fr', stage: 'finish', label: '정삭 이송 속도 (Finish Feed)', unit: 'mm/min', value: '100', desc: 'Z축 좌우 왕복 이송 속도 (정삭)' },
-
-      { id: 'toggle_fine', type: 'stageToggle', stageKey: 'fine', label: '미세정삭 가공 (Fine Finishing)' },
-      { id: 'fine_stk', stage: 'fine', label: '미세정삭 절입량 (Fine Stock)', unit: 'mm', value: '0.200', desc: '최종 치수 확보용 절입량' },
-      { id: 'fine_fr', stage: 'fine', label: '미세정삭 이송 (Fine Feed)', unit: 'mm/min', value: '50', desc: 'Z축 좌우 왕복 이송 속도 (미세정삭)' },
+      { id: 'finish_fr', stage: 'finish', label: '정삭 이송 속도 (Finish Feed)', unit: 'mm/min', value: '100', desc: 'Z축 좌우 왕복 이송 속도 (정삭, 목표직경까지)' },
 
       { id: 'toggle_spark', type: 'stageToggle', stageKey: 'spark', label: '스파크 아웃 (Spark-out)' },
-      { id: 'spark_out', stage: 'spark', label: '스파크 아웃 횟수 (Spark-out)', unit: 'Times', value: '2', desc: '목표 치수 도달 후 절입 없이 Z축 왕복을 반복하는 횟수' }
+      { id: 'spark_out', stage: 'spark', label: '스파크 아웃 횟수 (Spark-out)', unit: 'Times', value: '2', desc: '목표 치수 도달 후 절입 없이 Z축 왕복을 반복하는 횟수' },
+      { id: 'spark_dwell', stage: 'spark', label: '스파크 대기 시간 (번개모드)', unit: 's', value: '0', desc: '번개(지그재그)모드 전용. 스파크 왕복 후 절입 없이 머무는 휴지(G4). 0=생략.' },
+      { id: 'spark_rub_n', stage: 'spark', label: '스파크 비비기 횟수 (번개모드)', unit: 'Times', value: '0', desc: '번개모드 전용. 대기 후 목표경에서 가공부 전구간 직선 왕복(비비기) 횟수. 0=생략.' },
+      { id: 'spark_rub_feed', stage: 'spark', label: '스파크 비비기 이송 (번개모드)', unit: 'mm/min', value: '200', desc: '번개모드 비비기 왕복 이송 속도.' }
     ];
 
-    // --- 내경 연삭 (플런지) ---
-    const idPlungeGeometryFields = [
-      { id: 'd1', label: '시작 내경 (Start Dia.)', unit: 'mm', value: '48.500', desc: '가공 전 소재의 초기 내경 (접근 기준점)' },
-      { id: 'd2', label: '목표 내경 (Finish Dia.)', unit: 'mm', value: '50.000', desc: '가공 완료 후의 최종 목표 내경' },
-      { id: 'z_start', label: '가공 시작 위치 (Start Z)', unit: 'mm', value: '100.000', desc: 'Z축 방향 가공 시작 지점' },
-      { id: 'z_end', label: '가공 끝 위치 (End Z)', unit: 'mm', value: '125.000', desc: 'Z축 방향 가공 종료 지점' },
-      { id: 'width', label: '가공 폭 (Grind Width)', unit: 'mm', value: '25.000', desc: '플런지 연삭이 들어갈 폭' },
-      { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '2.000', desc: '내경 가공을 위해 휠이 접근할 때의 도피량' }
-    ];
-
-    const idPlungeCuttingFields = [
-      ...gapCuttingFields,
-      { id: 'work_rpm', label: '작업 회전 속도 (Work RPM)', unit: 'rpm', value: '250', desc: '공작물의 회전 속도' },
-      { id: 'wheel_vc', label: '휠 주속 (Wheel Vc)', unit: 'm/s', value: '35', desc: '연마 휠의 표면 속도' },
-
-      { id: 'toggle_rough', type: 'stageToggle', stageKey: 'rough', label: '황삭 가공 (Roughing)' },
-      { id: 'rough_stk', stage: 'rough', label: '황삭 절입량 (Rough Stock)', unit: 'mm', value: '1.000', desc: '황삭 구간의 총 가공량' },
-      { id: 'rough_fr', stage: 'rough', label: '황삭 이송 속도 (Rough Feed)', unit: 'mm/min', value: '0.400', desc: '황삭 구간 휠 진입 속도' },
-
-      { id: 'toggle_finish', type: 'stageToggle', stageKey: 'finish', label: '정삭 가공 (Finishing)' },
-      { id: 'finish_stk', stage: 'finish', label: '정삭 절입량 (Finish Stock)', unit: 'mm', value: '0.400', desc: '정삭 구간의 총 가공량' },
-      { id: 'finish_fr', stage: 'finish', label: '정삭 이송 속도 (Finish Feed)', unit: 'mm/min', value: '0.100', desc: '정삭 구간 휠 진입 속도' },
-
-      { id: 'toggle_fine', type: 'stageToggle', stageKey: 'fine', label: '미세정삭 가공 (Fine Finishing)' },
-      { id: 'fine_stk', stage: 'fine', label: '미세정삭 절입량 (Fine Stock)', unit: 'mm', value: '0.100', desc: '최종 치수 확보를 위한 미세 절입량' },
-      { id: 'fine_fr', stage: 'fine', label: '미세정삭 이송 (Fine Feed)', unit: 'mm/min', value: '0.020', desc: '미세정삭 구간 휠 진입 속도' },
-
-      { id: 'toggle_spark', type: 'stageToggle', stageKey: 'spark', label: '스파크 아웃 (Spark-out)' },
-      { id: 'spark_out', stage: 'spark', label: '스파크 아웃 횟수 (Spark-out)', unit: 'Times', value: '3', desc: '목표 치수 도달 후 절입 없이 회전하는 횟수 (표면 조도 향상)' }
-    ];
-
-    // --- 내경 연삭 (트래버스) ---
-    const idTraverseGeometryFields = [
-      { id: 'd1', label: '시작 내경 (Start Dia.)', unit: 'mm', value: '48.500', desc: '가공 전 소재의 초기 내경' },
-      { id: 'd2', label: '목표 내경 (Finish Dia.)', unit: 'mm', value: '50.000', desc: '가공 완료 후의 최종 목표 내경' },
-      { id: 'z_start', label: '가공 시작 위치 (Start Pos.)', unit: 'mm', value: '100.000', desc: '왕복(Traverse) 운동이 시작되는 Z축 지점' },
-      { id: 'z_end', label: '가공 종료 위치 (End Pos.)', unit: 'mm', value: '50.000', desc: '왕복(Traverse) 운동이 끝나는 Z축 지점' },
-      { id: 'zigzag_angle', label: '지그재그 가공 각도 (Zigzag Angle)', unit: 'deg', value: '0.000', desc: '지그재그 왕복 가공 시 Z축 대비 기울기 각도 지정' },
-      { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '2.000', desc: '가공 전 휠이 접근할 때의 도피량' },
-      { id: 'over_start', label: '트래버스 오버런 (Start)', unit: 'mm', value: '15.000', desc: '시작 위치(Start Pos.)를 벗어나 휠이 더 나가는 거리' },
-      { id: 'over_end', label: '트래버스 오버런 (End)', unit: 'mm', value: '15.000', desc: '종료 위치(End Pos.)를 벗어나 휠이 더 나가는 거리' },
-      { id: 'infeed_start', label: '시작단 절입량 (Infeed Start)', unit: 'mm', value: '0.005', desc: '시작 위치에서 방향을 바꿀 때 1회 절입되는 양' },
-      { id: 'infeed_end', label: '종료단 절입량 (Infeed End)', unit: 'mm', value: '0.000', desc: '종료 위치에서 방향을 바꿀 때 1회 절입되는 양' }
-    ];
-
-    const idTraverseCuttingFields = [
-      ...gapCuttingFields,
-      { id: 'work_rpm', label: '작업 회전 속도 (Work RPM)', unit: 'rpm', value: '250', desc: '공작물의 회전 속도' },
-      { id: 'wheel_vc', label: '휠 주속 (Wheel Vc)', unit: 'm/s', value: '35', desc: '연마 휠의 표면 속도' },
-
-      { id: 'toggle_rough', type: 'stageToggle', stageKey: 'rough', label: '황삭 가공 (Roughing)' },
-      { id: 'rough_stk', stage: 'rough', label: '황삭 절입량 (Rough Stock)', unit: 'mm', value: '0.500', desc: '트래버스 황삭 구간의 전체 가공량' },
-      { id: 'rough_fr', stage: 'rough', label: '황삭 이송 속도 (Rough Feed)', unit: 'mm/min', value: '300', desc: 'Z축 좌우 왕복 이송 속도 (황삭)' },
-
-      { id: 'toggle_finish', type: 'stageToggle', stageKey: 'finish', label: '정삭 가공 (Finishing)' },
-      { id: 'finish_stk', stage: 'finish', label: '정삭 절입량 (Finish Stock)', unit: 'mm', value: '0.300', desc: '트래버스 정삭 구간의 전체 가공량' },
-      { id: 'finish_fr', stage: 'finish', label: '정삭 이송 속도 (Finish Feed)', unit: 'mm/min', value: '100', desc: 'Z축 좌우 왕복 이송 속도 (정삭)' },
-
-      { id: 'toggle_fine', type: 'stageToggle', stageKey: 'fine', label: '미세정삭 가공 (Fine Finishing)' },
-      { id: 'fine_stk', stage: 'fine', label: '미세정삭 절입량 (Fine Stock)', unit: 'mm', value: '0.200', desc: '최종 치수 확보용 절입량' },
-      { id: 'fine_fr', stage: 'fine', label: '미세정삭 이송 (Fine Feed)', unit: 'mm/min', value: '50', desc: 'Z축 좌우 왕복 이송 속도 (미세정삭)' },
-
-      { id: 'toggle_spark', type: 'stageToggle', stageKey: 'spark', label: '스파크 아웃 (Spark-out)' },
-      { id: 'spark_out', stage: 'spark', label: '스파크 아웃 횟수 (Spark-out)', unit: 'Times', value: '2', desc: '목표 치수 도달 후 절입 없이 Z축 왕복을 반복하는 횟수' }
-    ];
-
-    // --- 단면 연삭 (플런지) ---
-    const facePlungeGeometryFields = [
-      { id: 'z1', label: '시작 단면 위치 (Start Z)', unit: 'mm', value: '100.000', desc: '가공 전 소재 상단면의 Z축 기준점' },
-      { id: 'z2', label: '목표 단면 위치 (Finish Z)', unit: 'mm', value: '98.500', desc: '가공 완료 후의 최종 목표 단면 Z 위치' },
-      { id: 'x_pos', label: '가공 위치 X (Grind Pos. X)', unit: 'mm', value: '50.000', desc: '단면 플런지 연삭이 들어가는 X축 위치' },
-      { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '2.000', desc: '하강 시 급속 이송이 끝나는 안전 도피량' }
-    ];
-
-    const facePlungeCuttingFields = [
-      ...gapCuttingFields,
-      { id: 'work_rpm', label: '작업 회전 속도 (Work RPM)', unit: 'rpm', value: '250', desc: '공작물의 회전 속도' },
-      { id: 'wheel_vc', label: '휠 주속 (Wheel Vc)', unit: 'm/s', value: '35', desc: '연마 휠의 표면 속도' },
-
-      { id: 'toggle_rough', type: 'stageToggle', stageKey: 'rough', label: '황삭 가공 (Roughing)' },
-      { id: 'rough_stk', stage: 'rough', label: '황삭 절입량 (Rough Stock)', unit: 'mm', value: '1.000', desc: '황삭 하강 구간의 총 가공량' },
-      { id: 'rough_fr', stage: 'rough', label: '황삭 이송 속도 (Rough Feed)', unit: 'mm/min', value: '0.500', desc: '황삭 구간 Z축 진입 속도' },
-
-      { id: 'toggle_finish', type: 'stageToggle', stageKey: 'finish', label: '정삭 가공 (Finishing)' },
-      { id: 'finish_stk', stage: 'finish', label: '정삭 절입량 (Finish Stock)', unit: 'mm', value: '0.400', desc: '정삭 하강 구간의 총 가공량' },
-      { id: 'finish_fr', stage: 'finish', label: '정삭 이송 속도 (Finish Feed)', unit: 'mm/min', value: '0.100', desc: '정삭 구간 Z축 진입 속도' },
-
-      { id: 'toggle_fine', type: 'stageToggle', stageKey: 'fine', label: '미세정삭 가공 (Fine Finishing)' },
-      { id: 'fine_stk', stage: 'fine', label: '미세정삭 절입량 (Fine Stock)', unit: 'mm', value: '0.100', desc: '최종 치수 확보를 위한 미세 절입량' },
-      { id: 'fine_fr', stage: 'fine', label: '미세정삭 이송 (Fine Feed)', unit: 'mm/min', value: '0.020', desc: '미세정삭 구간 Z축 진입 속도' },
-
-      { id: 'toggle_spark', type: 'stageToggle', stageKey: 'spark', label: '스파크 아웃 (Spark-out)' },
-      { id: 'spark_out', stage: 'spark', label: '스파크 아웃 횟수 (Spark-out)', unit: 'Times', value: '3', desc: '목표 위치 도달 후 회전하는 횟수' }
-    ];
-
-    // --- 단면 연삭 (트래버스) ---
-    const faceTraverseGeometryFields = [
-      { id: 'z1', label: '시작 단면 위치 (Start Z)', unit: 'mm', value: '100.000', desc: '가공 전 소재 상단면의 Z축 기준점' },
-      { id: 'z2', label: '목표 단면 위치 (Finish Z)', unit: 'mm', value: '99.000', desc: '가공 완료 후의 최종 목표 단면 Z 위치' },
-      { id: 'x_start', label: '가공 시작 위치 X (Start Pos.)', unit: 'mm', value: '60.000', desc: 'X축 트래버스가 시작되는 위치' },
-      { id: 'x_end', label: '가공 종료 위치 X (End Pos.)', unit: 'mm', value: '20.000', desc: 'X축 트래버스가 끝나는 위치' },
-      { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '2.000', desc: '하강 시 급속 이송이 끝나는 안전 도피량' },
-      { id: 'over_start', label: '트래버스 오버런 (Start)', unit: 'mm', value: '10.000', desc: '시작 위치(Start Pos. X)를 벗어나 휠이 더 나가는 거리' },
-      { id: 'over_end', label: '트래버스 오버런 (End)', unit: 'mm', value: '10.000', desc: '종료 위치(End Pos. X)를 벗어나 휠이 더 나가는 거리' },
-      { id: 'infeed_start', label: '시작단 절입량 (Infeed Start)', unit: 'mm', value: '0.005', desc: '시작 위치에서 방향을 바꿀 때 Z축으로 1회 절입되는 양' },
-      { id: 'infeed_end', label: '종료단 절입량 (Infeed End)', unit: 'mm', value: '0.000', desc: '종료 위치에서 방향을 바꿀 때 Z축으로 1회 절입되는 양' }
-    ];
-
-    const faceTraverseCuttingFields = [
-      ...gapCuttingFields,
-      { id: 'work_rpm', label: '작업 회전 속도 (Work RPM)', unit: 'rpm', value: '250', desc: '공작물의 회전 속도' },
-      { id: 'wheel_vc', label: '휠 주속 (Wheel Vc)', unit: 'm/s', value: '35', desc: '연마 휠의 표면 속도' },
-
-      { id: 'toggle_rough', type: 'stageToggle', stageKey: 'rough', label: '황삭 가공 (Roughing)' },
-      { id: 'rough_stk', stage: 'rough', label: '황삭 절입량 (Rough Stock)', unit: 'mm', value: '0.500', desc: '트래버스 황삭 구간의 전체 가공량' },
-      { id: 'rough_fr', stage: 'rough', label: '황삭 이송 속도 (Rough Feed)', unit: 'mm/min', value: '300', desc: 'X축 좌우 왕복 이송 속도 (황삭)' },
-
-      { id: 'toggle_finish', type: 'stageToggle', stageKey: 'finish', label: '정삭 가공 (Finishing)' },
-      { id: 'finish_stk', stage: 'finish', label: '정삭 절입량 (Finish Stock)', unit: 'mm', value: '0.300', desc: '트래버스 정삭 구간의 전체 가공량' },
-      { id: 'finish_fr', stage: 'finish', label: '정삭 이송 속도 (Finish Feed)', unit: 'mm/min', value: '100', desc: 'X축 좌우 왕복 이송 속도 (정삭)' },
-
-      { id: 'toggle_fine', type: 'stageToggle', stageKey: 'fine', label: '미세정삭 가공 (Fine Finishing)' },
-      { id: 'fine_stk', stage: 'fine', label: '미세정삭 절입량 (Fine Stock)', unit: 'mm', value: '0.200', desc: '최종 치수 확보용 절입량' },
-      { id: 'fine_fr', stage: 'fine', label: '미세정삭 이송 (Fine Feed)', unit: 'mm/min', value: '50', desc: 'X축 좌우 왕복 이송 속도 (미세정삭)' },
-
-      { id: 'toggle_spark', type: 'stageToggle', stageKey: 'spark', label: '스파크 아웃 (Spark-out)' },
-      { id: 'spark_out', stage: 'spark', label: '스파크 아웃 횟수 (Spark-out)', unit: 'Times', value: '2', desc: '절입 없이 X축 왕복을 반복하는 횟수' }
-    ];
-    
-    // --- 드레싱 (싱글포인트) 파라미터 ---
-    const dressGeometryFields = [
-      { id: 'dress_direction', label: '드레싱 방향 (Direction)', type: 'radioGroup', options: [{val: 'horizontal', label: '가로 방향 (Traverse)'}, {val: 'vertical', label: '세로 방향 (Plunge)'}], desc: '드레싱 공구의 이송 방향 선택' },
-      { id: 'total_dress_amt', label: '총 드레싱 량 (Total Amount)', unit: 'mm', value: '0.020', desc: '드레싱 할 총 절입량' },
-      { id: 'dress_interval', label: '가공 인터벌 (Interval)', unit: 'Times', value: '1', desc: '몇 개의 공작물 가공 후 드레싱을 실행할지 빈도 설정' },
-      { id: 'zigzag_angle', label: '지그재그 각도 (Zigzag Angle)', unit: 'deg', value: '0.000', desc: '가로 방향(Traverse) 드레싱 시 사선(지그재그) 이송 각도 지정' },
-      { id: 'dress_start_offset', label: '시작 위치 오프셋 (Start Offset)', unit: 'mm', value: '0.000', desc: '드레싱 시작 위치 여유값' },
-      { id: 'dress_end_offset', label: '종료 위치 오프셋 (End Offset)', unit: 'mm', value: '0.000', desc: '드레싱 종료 위치 여유값' }
-    ];
-
-    const dressCuttingFields = [
-      { id: 'wheel_rpm', label: '휠 회전 속도 (Wheel RPM)', unit: 'rpm', value: '1500', desc: '드레싱 시 휠 회전수' },
-      
-      { id: 'toggle_rough', type: 'stageToggle', stageKey: 'rough', label: '황삭 드레싱 (Roughing)' },
-      { id: 'rough_infeed', stage: 'rough', label: '황삭 절입량 (Rough Infeed)', unit: 'mm', value: '0.010', desc: '황삭 드레싱 1회 절입량' },
-      { id: 'rough_feed', stage: 'rough', label: '황삭 이송 속도 (Rough Feed)', unit: 'mm/min', value: '100', desc: '황삭 드레싱 이송 속도' },
-
-      { id: 'toggle_finish', type: 'stageToggle', stageKey: 'finish', label: '정삭 드레싱 (Finishing)' },
-      { id: 'finish_infeed', stage: 'finish', label: '정삭 절입량 (Finish Infeed)', unit: 'mm', value: '0.005', desc: '정삭 드레싱 1회 절입량' },
-      { id: 'finish_feed', stage: 'finish', label: '정삭 이송 속도 (Finish Feed)', unit: 'mm/min', value: '50', desc: '정삭 드레싱 이송 속도' },
-
-      { id: 'toggle_fine', type: 'stageToggle', stageKey: 'fine', label: '미세정삭 드레싱 (Fine Finishing)' },
-      { id: 'fine_infeed', stage: 'fine', label: '미세정삭 절입량 (Fine Infeed)', unit: 'mm', value: '0.002', desc: '미세정삭 드레싱 1회 절입량' },
-      { id: 'fine_feed', stage: 'fine', label: '미세정삭 이송 속도 (Fine Feed)', unit: 'mm/min', value: '20', desc: '미세정삭 드레싱 이송 속도' },
-
-      { id: 'toggle_spark', type: 'stageToggle', stageKey: 'spark', label: '스파크 아웃 (Spark-out)' },
-      { id: 'spark_out', stage: 'spark', label: '스파크 아웃 횟수 (Spark-out)', unit: 'Times', value: '1', desc: '절입 없이 왕복하는 횟수 (논-컷 패스)' }
-    ];
-
-    // --- 신규: 드레싱 (로터리) 파라미터 ---
-    const dressRotaryGeometryFields = [
-      { id: 'dress_direction', label: '드레싱 방향 (Direction)', type: 'radioGroup', options: [{val: 'horizontal', label: '가로 방향 (Traverse)'}, {val: 'vertical', label: '세로 방향 (Plunge)'}], desc: '로터리 드레서의 이송 방향 선택' },
-      { id: 'speed_ratio', label: '속도 비 (Speed Ratio)', unit: '%', value: '0.8', desc: '연삭 휠 대비 로터리 휠의 상대 회전 속도 비율' },
-      { id: 'total_dress_amt', label: '총 드레싱 량 (Total Amount)', unit: 'mm', value: '0.020', desc: '드레싱 할 총 절입량' },
-      { id: 'dress_interval', label: '가공 인터벌 (Interval)', unit: 'Times', value: '1', desc: '몇 개의 공작물 가공 후 드레싱을 실행할지 빈도 설정' },
-      { id: 'zigzag_angle', label: '지그재그 각도 (Zigzag Angle)', unit: 'deg', value: '0.000', desc: '가로 방향(Traverse) 드레싱 시 사선(지그재그) 이송 각도 지정' }
-    ];
-
-    const dressRotaryCuttingFields = [
-      { id: 'wheel_rpm', label: '연삭 휠 속도 (Wheel RPM)', unit: 'rpm', value: '1500', desc: '드레싱 시 연삭 휠 회전수' },
-      { id: 'rotary_rpm', label: '로터리 휠 속도 (Rotary RPM)', unit: 'rpm', value: '1200', desc: '로터리 드레서의 회전수' },
-      
-      { id: 'toggle_rough', type: 'stageToggle', stageKey: 'rough', label: '황삭 드레싱 (Roughing)' },
-      { id: 'rough_infeed', stage: 'rough', label: '황삭 절입량 (Rough Infeed)', unit: 'mm', value: '0.010', desc: '황삭 드레싱 1회 절입량' },
-      { id: 'rough_feed', stage: 'rough', label: '황삭 이송 속도 (Rough Feed)', unit: 'mm/min', value: '100', desc: '황삭 드레싱 이송 속도' },
-
-      { id: 'toggle_finish', type: 'stageToggle', stageKey: 'finish', label: '정삭 드레싱 (Finishing)' },
-      { id: 'finish_infeed', stage: 'finish', label: '정삭 절입량 (Finish Infeed)', unit: 'mm', value: '0.005', desc: '정삭 드레싱 1회 절입량' },
-      { id: 'finish_feed', stage: 'finish', label: '정삭 이송 속도 (Finish Feed)', unit: 'mm/min', value: '50', desc: '정삭 드레싱 이송 속도' },
-
-      { id: 'toggle_fine', type: 'stageToggle', stageKey: 'fine', label: '미세정삭 드레싱 (Fine Finishing)' },
-      { id: 'fine_infeed', stage: 'fine', label: '미세정삭 절입량 (Fine Infeed)', unit: 'mm', value: '0.002', desc: '미세정삭 드레싱 1회 절입량' },
-      { id: 'fine_feed', stage: 'fine', label: '미세정삭 이송 속도 (Fine Feed)', unit: 'mm/min', value: '20', desc: '미세정삭 드레싱 이송 속도' },
-
-      { id: 'toggle_spark', type: 'stageToggle', stageKey: 'spark', label: '스파크 아웃 (Spark-out)' },
-      { id: 'spark_out', stage: 'spark', label: '스파크 아웃 횟수 (Spark-out)', unit: 'Times', value: '1', desc: '절입 없이 왕복하는 횟수 (논-컷 패스)' }
-    ];
 
     const isSetupMode = (currentMenuInfo as any)?.isSetup;
     const isDressingMode = (currentMenuInfo as any)?.isDress;
 
     const getTabs = () => {
-      if (selectedMenu === 'work_coord') return [
-        { id: 'coord_work', label: '소재 워크좌표계' }, 
-        { id: 'coord_dresser_single', label: '드레싱 원점 (싱글)' },
-        { id: 'coord_dresser_rotary', label: '드레싱 원점 (로터리)' }
-      ];
+      if (selectedMenu === 'work_coord') return [{ id: 'coord_work', label: '소재 워크좌표계' }];
       if (selectedMenu === 'tool_setup') return [
-        { id: 'wheel', label: '연삭 휠 및 보정' }, 
-        { id: 'dresser', label: '싱글포인트 제원' }, 
-        { id: 'dresser_rotary', label: '로터리 드레서 제원' },
+        { id: 'wheel', label: '연삭 휠 및 보정' },
         { id: 'spindle_angle', label: '밀링 스핀들 각도 (B축)' }
       ];
-      
-      if (selectedMenu === 'dress_rotary') return [{ id: 'geometry', label: '로터리 드레싱 설정' }, { id: 'cutting', label: '로터리 드레싱 조건' }];
-      if (isDressingMode) return [{ id: 'geometry', label: '드레싱 설정' }, { id: 'cutting', label: '드레싱 조건' }];
-      
-      if (selectedMenu !== 'face_traverse') {
-        return [
-          { id: 'geometry', label: '공작물 형상' }, 
-          { id: 'cutting', label: '가공 조건' },
-          { id: 'gauge', label: '실시간 측정' }
-        ];
-      }
-
       return [{ id: 'geometry', label: '공작물 형상' }, { id: 'cutting', label: '가공 조건' }];
     };
 
     const getActiveFields = () => {
       if (activeTab === 'coord_work') return coordWorkFields;
-      if (activeTab === 'coord_dresser_single') return coordDresserSingleFields;
-      if (activeTab === 'coord_dresser_rotary') return coordDresserRotaryFields;
       if (activeTab === 'wheel') return wheelSetupFields;
-      if (activeTab === 'dresser') return dresserSetupFields;
-      if (activeTab === 'dresser_rotary') return dresserRotarySetupFields;
       if (activeTab === 'spindle_angle') return spindleAngleFields;
-      if (activeTab === 'gauge') return gaugeFields; 
-      
       if (activeTab === 'geometry') {
-        if (selectedMenu === 'dress_single') return dressGeometryFields;
-        if (selectedMenu === 'dress_rotary') return dressRotaryGeometryFields;
         if (selectedMenu === 'od_plunge') return odPlungeGeometryFields;
         if (selectedMenu === 'od_traverse') return odTraverseGeometryFields;
-        if (selectedMenu === 'id_plunge') return idPlungeGeometryFields;
-        if (selectedMenu === 'id_traverse') return idTraverseGeometryFields;
-        if (selectedMenu === 'face_plunge') return facePlungeGeometryFields;
-        if (selectedMenu === 'face_traverse') return faceTraverseGeometryFields;
         return [];
       }
       if (activeTab === 'cutting') {
-        if (selectedMenu === 'dress_single') return dressCuttingFields;
-        if (selectedMenu === 'dress_rotary') return dressRotaryCuttingFields;
         if (selectedMenu === 'od_plunge') return odPlungeCuttingFields;
         if (selectedMenu === 'od_traverse') return odTraverseCuttingFields;
-        if (selectedMenu === 'id_plunge') return idPlungeCuttingFields;
-        if (selectedMenu === 'id_traverse') return idTraverseCuttingFields;
-        if (selectedMenu === 'face_plunge') return facePlungeCuttingFields;
-        if (selectedMenu === 'face_traverse') return faceTraverseCuttingFields;
         return [];
       }
       return [];
@@ -626,12 +409,396 @@ const App = () => {
       else setActiveTab('geometry');
     };
 
+    // =========================================================
+    // NC 생성 엔진 (SMX / FANUC / 직경지령 / 위치제어)
+    //  - 현재 지원: OD 플런지
+    //  - 미확정 항목은 (***확인필요***) 마커로 출력
+    // =========================================================
+    const gv = (f: any) => paramValues[`${selectedMenu}:${f.id}`] ?? f.value; // 현재 화면 편집값 우선
+    const toMap = (arr: any[]) => {
+      const m: any = {};
+      arr.forEach(f => { if (f && f.id && f.value !== undefined) m[f.id] = gv(f); });
+      return m;
+    };
+    // 다른 화면(공구설정/워크좌표)에서 편집한 값을 해당 화면 키로 읽기
+    const gvAt = (menuKey: string, f: any) => paramValues[`${menuKey}:${f.id}`] ?? f.value;
+    const toMapAt = (menuKey: string, arr: any[]) => {
+      const m: any = {};
+      arr.forEach(f => { if (f && f.id && f.value !== undefined) m[f.id] = gvAt(menuKey, f); });
+      return m;
+    };
+
+    const generateODPlunge = () => {
+      const geo = toMap(odPlungeGeometryFields);
+      const cut = toMap(odPlungeCuttingFields);
+      const wheel = toMapAt('tool_setup', wheelSetupFields); // 공구설정 화면 입력 반영
+
+      const N = (v: any) => parseFloat(v);
+      const f3 = (v: number) => v.toFixed(3);
+
+      const d1 = N(geo.d1), d2 = N(geo.d2);
+      const zs = N(geo.z_start);
+      const clr = N(geo.clearance);
+      const gwIn = N(geo.width);            // 가공 길이 (부호=방향: 음수=Z−, 양수=Z+)
+      const gw = Math.abs(gwIn);            // 길이 절대값 (총 가공 길이)
+      const dir = gwIn < 0 ? -1 : 1;        // 이송 방향
+      const ze = zs + dir * gw;             // 끝위치 = 시작 + 방향×길이
+      const zSafe = zs - dir * clr;         // Z 안전위치: 가공시작 경계 바깥(이송 반대쪽)으로 안전거리
+      const workRpm = N(cut.work_rpm);
+      const vc = N(cut.wheel_vc);
+      const wheelOd = N(wheel.wheel_od);
+      const wheelW = N(wheel.wheel_width);  // 휠 폭
+      const tCode = wheel.t_code || '0101';
+      const bAng = parseFloat(bAngle);
+      const gCode = paramValues['work_coord:g_code'] ?? '54'; // 소재 워크좌표계 (편집값 반영)
+
+      // --- 현실성 검증 ---
+      const warn: string[] = [];
+      if (!(d2 < d1)) warn.push('목표직경(d2)이 시작직경(d1)보다 작아야 합니다 - OD는 제거가공.');
+      const total = d1 - d2;
+      const roughOffset = activeStages.rough ? N(cut.rough_offset) : 0; // 황삭 옵셋(목표직경 위로 남기는 양)
+      if (activeStages.rough && roughOffset >= total) warn.push(`황삭 옵셋(${roughOffset})이 총제거량(${total.toFixed(3)}) 이상 → 황삭이 목표에 못 미침.`);
+      if (!(workRpm > 0)) warn.push('워크 회전수가 0 이하입니다.');
+      if (!(wheelOd > 0)) warn.push('휠 외경이 0 이하입니다.');
+      if (offsetMode !== 'x_plus') warn.push(`OD는 공구 옵셋 기준이 외경(X+)이어야 합니다. (현재: ${offsetMode})`);
+      if (!(wheelW > 0)) warn.push('휠 폭이 입력되지 않았습니다 (공구설정에서 입력).');
+      const passWv = plungePaths.length > 0 ? plungePaths.map(Number) : [Math.min(wheelW > 0 ? wheelW : gw, gw)];
+      const sumWv = passWv.reduce((a, b) => a + (Number(b) || 0), 0);
+      if (gw - sumWv > 0.001) warn.push(`남은 가공길이 ${(gw - sumWv).toFixed(3)}mm → 툴패스 추가/길이 조정 필요.`);
+      passWv.forEach((w, i) => { if (Number(w) > wheelW + 1e-6) warn.push(`툴패스 ${i + 1} 폭(${w}) > 휠폭(${wheelW}) → 1회 플런지 불가.`); });
+
+      // --- 산출 ---
+      const sw = wheelOd > 0 ? Math.round((vc * 60000) / (Math.PI * wheelOd)) : 0; // 휠 rpm
+      const zc = f3((zs + ze) / 2);          // 가공폭 중앙 Z
+      // 옵셋 보정(직경): 접촉점이 목표경에 닿도록 제어점 X를 자동 보정.
+      //  x+ =접촉면 자체(0) / 센터=휠 중심까지(+휠반경=휠경/2) / x-(내경)=휠 반대편까지(+휠경)
+      //  예) 휠Ø100, 접촉 X100 → x+:X100, 센터:X150, x-:X200
+      const xOff = offsetMode === 'center' ? wheelOd / 2 : offsetMode === 'x_minus' ? wheelOd : 0;
+      const xc = (d: number) => f3(d + xOff);  // NC 출력 X(=제어점 직경)
+      const xApproach = d1 + 2 * clr;        // 접근 에어갭(접촉 직경 기준)
+      const xRetract = d1 + 2 * clr + 1;     // 안전 후퇴경(접촉 직경 기준)
+
+      // 단계 시퀀스 산출 (황삭=목표경+황삭옵셋까지, 정삭=목표경 그대로)
+      const seqRaw: { lbl: string; t: number; f: any }[] = [];
+      if (activeStages.rough) seqRaw.push({ lbl: 'ROUGH', t: d2 + roughOffset, f: cut.rough_fr });
+      if (activeStages.finish) seqRaw.push({ lbl: 'FINISH', t: d2, f: cut.finish_fr });
+      if (seqRaw.length) seqRaw[seqRaw.length - 1].t = d2; // 최종 단계는 목표경(d2)에 정확히 도달
+      let prevT = d1;
+      for (const s of seqRaw) { s.t = Math.min(Math.max(s.t, d2), prevT); prevT = s.t; } // 단조감소 + d2 클램프
+      const seq = seqRaw.map(s => ({ lbl: s.lbl, t: s.t, f: s.f }));
+      let cur = seqRaw.length ? seqRaw[seqRaw.length - 1].t : d1; // 스파크아웃용 최종 직경(접촉)
+
+      const L: string[] = [];
+      const moves: any[] = []; // 시뮬레이션용 경로 (x=직경, z, rapid, dwell)
+      L.push('%');
+      L.push(`O0010 (OD PLUNGE GRIND / ${selectedProject.name})`);
+      L.push('(WORK:P11-C1  WHEEL:P12  X=DIA  FEED:G98)');
+      L.push(`(OFFSET:${offsetMode}  X-COMP=+${xOff.toFixed(3)} DIA  [x+:0 / center:+R / x-:+D]  ***기계검증***)`);
+      warn.forEach(w => L.push(`(***확인필요*** ${w})`));
+      L.push(`G0 G98 G80 G40 G${gCode}`);
+      L.push('G18');
+      L.push('G28 U0 W0');
+      L.push(`T${tCode}`);
+      L.push(`G400 B${bAng} J1 (***확인필요*** J=인선방향, 실제 휠 등록값 확인)`);
+      L.push('(***확인필요*** 워크회전 P11 + 휠회전 P12 동시운용 계통/C1 비클램프 - 실제 연삭 NC 확인)');
+      L.push('M8');
+      L.push(`G97 M3 S${sw} P12 (WHEEL Vc${vc}M/S @OD${wheelOd}=${sw}RPM)`);
+      L.push(`G97 M3 S${workRpm} P11 (WORK ${workRpm}RPM)`);
+      const doPlungeAt = (zPos: string) => {
+        const zN = parseFloat(zPos);
+        L.push(`G0 X${xc(xApproach)} Z${f3(zSafe)}`); // 안전 X·Z(가공시작 바깥)로 급속 접근
+        moves.push({ x: xApproach, z: zSafe, rapid: true, line: L.length - 1 });
+        L.push(`G0 Z${zPos}`);                        // 그라인드 Z(선단)로 이동
+        moves.push({ x: xApproach, z: zN, rapid: true, line: L.length - 1 });
+        seq.forEach(s => { L.push(`(--- ${s.lbl} ---)`); L.push(`G1 X${xc(s.t)} F${s.f}`); moves.push({ x: s.t, z: zN, rapid: false, line: L.length - 1 }); });
+        if (activeStages.spark) {
+          const dw = N(cut.spark_out);
+          if (dw > 0) { L.push('(--- SPARK OUT : DWELL ---)'); L.push(`G4 X${dw.toFixed(1)} (휴지 ${cut.spark_out}s)`); moves.push({ x: cur, z: zN, dwell: dw, rapid: false, line: L.length - 1 }); }
+        }
+        L.push(`G0 X${xc(xApproach)}`); // X 도피
+        moves.push({ x: xApproach, z: zN, rapid: true, line: L.length - 1 });
+        L.push(`G0 Z${f3(zSafe)}`); // Z 도피 (가공시작 바깥, 안전거리)
+        moves.push({ x: xApproach, z: zSafe, rapid: true, line: L.length - 1 });
+      };
+
+      moves.push({ x: xRetract, z: parseFloat(zc), rapid: true, line: L.length - 1 }); // 시작(후퇴) 위치
+
+      // 플런지: 가공시작(z_start)에서 dir로 진입. 선단(제어점)=첫 접촉면=이송방향 앞단(끝쪽).
+      // 자동분할 없음: 기본 1패스 + '툴패스 추가'(plungePaths)만큼 휠폭씩 순차. (길이는 절대값)
+      const wW = wheelW > 0 ? wheelW : gw;
+      const passW = plungePaths.length > 0 ? plungePaths.map(Number) : [Math.min(wW, gw)]; // 패스별 길이(편집값)
+      let cum = 0; // 가공시작에서 이미 진입한 길이(절대값)
+      for (let i = 0; i < passW.length && cum < gw - 1e-6; i++) {
+        const cover = Math.min(Math.max(passW[i] || 0, 0), wW, gw - cum); // 패스 길이(휠폭·남은길이 이내)
+        if (cover <= 1e-6) continue;
+        const leadZ = zs + dir * (cum + cover); // 선단(제어점)=이송방향 앞단(첫 접촉면)
+        L.push(`(TOOLPATH ${i + 1}/${passW.length} 선단@Z${f3(leadZ)} 폭 ${cover.toFixed(3)})`);
+        doPlungeAt(f3(leadZ));
+        cum += cover;
+      }
+
+      // 스파크아웃 왕복: 모든 정삭 완료 후, 목표경(d2)에서 가공부 전구간을 왕복.
+      // 선단(제어점) 기준으로 스윕 → 휠 몸체(폭 wW)가 [zs..ze] 전체 + 오버런을 커버. (플런지와 동일한 선단 모델)
+      if (activeStages.spark) {
+        const oscN = Math.round(N(cut.spark_osc_n) || 0), oscF = cut.spark_osc_feed, over = Math.max(N(cut.spark_osc_overrun) || 0, 0);
+        const leadA = zs + dir * (wW - over); // 시작측 선단(몸체가 zs까지 덮음; over면 더 지나침)
+        const leadB = ze + dir * over;        // 끝측 선단(가공 끝 + 오버런)
+        const sweep = dir * (leadB - leadA);  // 양수면 유효 스윕(휠이 가공부보다 좁음)
+        if (oscN > 0 && sweep > 1e-6) {
+          L.push(`(=== SPARK OUT : FULL-ZONE OSCILLATION x${oscN} (전구간 왕복, 오버런 ${over.toFixed(3)}) ===)`);
+          L.push(`G0 X${xc(xApproach)} Z${f3(leadA)}`); moves.push({ x: xApproach, z: leadA, rapid: true, line: L.length - 1 });
+          L.push(`G1 X${xc(d2)} F${oscF}`); moves.push({ x: d2, z: leadA, rapid: false, line: L.length - 1 });
+          for (let k = 0; k < oscN; k++) {
+            L.push(`G1 Z${f3(leadB)} F${oscF}`); moves.push({ x: d2, z: leadB, rapid: false, line: L.length - 1 });
+            L.push(`G1 Z${f3(leadA)} F${oscF}`); moves.push({ x: d2, z: leadA, rapid: false, line: L.length - 1 });
+          }
+          L.push(`G0 X${xc(xApproach)}`); moves.push({ x: xApproach, z: leadA, rapid: true, line: L.length - 1 });
+          L.push(`G0 Z${f3(zSafe)}`); moves.push({ x: xApproach, z: zSafe, rapid: true, line: L.length - 1 });
+        }
+      }
+
+      L.push(`G0 X${xc(xRetract)}`);
+      moves.push({ x: xRetract, z: parseFloat(zc), rapid: true, line: L.length - 1 });
+      L.push('M5 P12');
+      L.push('M5 P11');
+      L.push('M9');
+      L.push('G28 U0 W0');
+      L.push('M30');
+      L.push('%');
+      const sim = {
+        moves, wheelOd, wheelW: wheelW > 0 ? wheelW : Math.max(gw, 5), wheelWReal: wheelW,
+        d1, d2, zMin: Math.min(zs, zs + dir * gw), zMax: Math.max(zs, zs + dir * gw), grindWidth: gw, offset: offsetMode, bAngle: bAng, bodyDir: dir,
+      };
+      return { code: L.join('\n'), sim };
+    };
+
+    // =========================================================
+    // OD 트래버스 (매크로 WHILE 루프 / 직경지령 / 위치제어)
+    // =========================================================
+    const generateODTraverse = () => {
+      const geo = toMap(odTraverseGeometryFields);
+      const cut = toMap(odTraverseCuttingFields);
+      const wheel = toMapAt('tool_setup', wheelSetupFields);
+      const N = (v: any) => parseFloat(v);
+      const f3 = (v: number) => v.toFixed(3);
+
+      const d1 = N(geo.d1), d2 = N(geo.d2);
+      const zs = N(geo.z_start), ze = N(geo.z_end);
+      const clr = N(geo.clearance);
+      const ovS = N(geo.over_start), ovE = N(geo.over_end);
+      const inS = N(geo.infeed_start), inE = N(geo.infeed_end);
+      const zig = N(geo.zigzag_angle) || 0;
+      const zigOn = Math.abs(zig) > 1e-6; // 번개(지그재그) 모드: 각도>0 (ON/OFF)
+      const workRpm = N(cut.work_rpm), vc = N(cut.wheel_vc);
+      const wheelOd = N(wheel.wheel_od);
+      const tCode = wheel.t_code || '0101';
+      const bAng = parseFloat(bAngle);
+      const gCode = paramValues['work_coord:g_code'] ?? '54';
+      const sw = wheelOd > 0 ? Math.round((vc * 60000) / (Math.PI * wheelOd)) : 0;
+
+      const sgn = (zs >= ze) ? 1 : -1;
+      const zStartLim = zs + sgn * ovS;   // 시작단 + 오버런
+      const zEndLim = ze - sgn * ovE;     // 종료단 + 오버런
+      const span = zEndLim - zStartLim;   // 시작→종료 Z(부호)
+      const sgnExpr = (v: number) => (v >= 0 ? `+${f3(v)}` : `-${f3(-v)}`); // U/W 상대지령 부호
+      const useMacro = travUseMacro && !zigOn; // 번개모드는 U/W 상대좌표 전개(매크로 비적용)
+      const xApproach = f3(d1 + 0.4);
+      const xRetract = f3(d1 + 2 * clr);
+
+      const warn: string[] = [];
+      if (!(d2 < d1)) warn.push('목표직경(d2)이 시작직경(d1)보다 작아야 합니다.');
+      const total = d1 - d2;
+      const roughOffset = activeStages.rough ? N(cut.rough_offset) : 0; // 황삭 옵셋(목표직경 위로 남기는 양)
+      if (activeStages.rough && roughOffset >= total) warn.push(`황삭 옵셋(${roughOffset})이 총제거량(${total.toFixed(3)}) 이상 → 황삭이 목표에 못 미침.`);
+      const noInfeed = (inS + inE) <= 0;
+      if (noInfeed) warn.push('시작단/종료단 절입이 모두 0 → 단계당 1패스로 처리.');
+      if (offsetMode !== 'x_plus') warn.push(`OD는 옵셋 기준이 외경(X+)이어야 합니다. (현재: ${offsetMode})`);
+      if (zigOn) {
+        const infZ = N(geo.zigzag_infeed) || 0;
+        warn.push(`번개(지그재그) 모드 ON: 한 레그=전체 Z 사선 트래버스(W±${Math.abs(span).toFixed(1)}) 중 X-로 ${infZ}/레그 절입. 레그마다 Z방향 교대 → X-로 강하. U/W 상대좌표, 매크로 미적용.`);
+        if (infZ <= 0) warn.push('번개 X 1회 절입량이 0 → 단계당 1패스 사선으로 처리됩니다. 값 입력 권장.');
+      }
+
+      const L: string[] = [];
+      const moves: any[] = [];
+      L.push('%');
+      L.push(`O0011 (OD TRAVERSE GRIND / ${selectedProject.name})`);
+      L.push(`(WORK:P11-C1  WHEEL:P12  X=DIA  FEED:G98  ${useMacro ? 'MACRO-B' : zigOn ? 'ZIGZAG U/W' : 'EXPANDED'})`);
+      warn.forEach(w => L.push(`(***확인필요*** ${w})`));
+      if (useMacro) L.push('(***확인필요*** 커스텀매크로B(#변수/WHILE/IF) 지원 - 실제 SMX 확인)');
+      L.push(`G0 G98 G80 G40 G${gCode}`);
+      L.push('G18');
+      L.push('G28 U0 W0');
+      L.push(`T${tCode}`);
+      L.push(`G400 B${bAng} J1 (***확인필요*** J=인선방향)`);
+      L.push('(***확인필요*** 워크회전 P11 + 휠회전 P12 동시운용 계통/C1 비클램프)');
+      L.push('M8');
+      L.push(`G97 M3 S${sw} P12 (WHEEL Vc${vc}M/S @OD${wheelOd}=${sw}RPM)`);
+      L.push(`G97 M3 S${workRpm} P11 (WORK ${workRpm}RPM)`);
+      if (useMacro) L.push(`#100 = ${f3(d1)} (CURRENT DIA)`);
+      L.push(`G0 X${xApproach} Z${f3(zStartLim)}`);
+      moves.push({ x: parseFloat(xRetract), z: zStartLim, rapid: true, line: L.length - 1 });
+      moves.push({ x: parseFloat(xApproach), z: zStartLim, rapid: true, line: L.length - 1 });
+
+      let curDia = d1;
+      const emitStage = (lbl: string, target: number, fr: any) => {
+        if (target >= curDia - 1e-6) return;
+        L.push(`(--- ${lbl} TRAVERSE -> DIA ${f3(target)}${zigOn ? ' (ZIGZAG U/W, X- 진행)' : ''} ---)`);
+        if (zigOn) {
+          // 번개(지그재그) 트래버스 — 한 레그 = 전체 Z를 사선으로 트래버스하며 X-로 1회 절입(절입량).
+          //  · Z 이동(전체 스팬) 중에 절입이 일어남(=사선 1줄)  · 레그마다 Z 방향 교대 → X-로 내려가는 번개.
+          const infD = Math.max(N(geo.zigzag_infeed) || 0, 0); // X 1회 절입량(직경, 레그당)
+          L.push(`G1 X${f3(curDia)} F${fr}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 }); // 시작단 표면 접촉
+          let atStart = true, guard = 0;
+          while (curDia > target + 1e-6 && guard < 100000) {
+            guard++;
+            const dropD = Math.min(infD > 1e-9 ? infD : (curDia - target), curDia - target);   // 이번 레그 X- 절입(직경)
+            const w = atStart ? span : -span;                                                  // 전체 Z 트래버스(부호 교대)
+            curDia -= dropD;
+            L.push(`G1 U${sgnExpr(-dropD)} W${sgnExpr(w)} F${fr}`);                             // 사선: Z 이동하며 X- 절입
+            moves.push({ x: curDia, z: atStart ? zEndLim : zStartLim, rapid: false, line: L.length - 1 });
+            atStart = !atStart;
+          }
+          // 평탄화: 목표경 직선으로 잔류 사선(테이퍼) 정리 + 시작단 정렬
+          L.push(`(--- LEVEL @DIA ${f3(target)} ---)`);
+          if (!atStart) { L.push(`G1 W${sgnExpr(-span)} F${fr}`); moves.push({ x: target, z: zStartLim, rapid: false, line: L.length - 1 }); }
+          else { L.push(`G1 W${sgnExpr(span)} F${fr}`); moves.push({ x: target, z: zEndLim, rapid: false, line: L.length - 1 }); L.push(`G1 W${sgnExpr(-span)} F${fr}`); moves.push({ x: target, z: zStartLim, rapid: false, line: L.length - 1 }); }
+          curDia = target;
+          return;
+        }
+        if (noInfeed) {
+          L.push(`G1 X${f3(target)} F${fr}`); curDia = target; moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+          L.push(`G1 Z${f3(zEndLim)} F${fr}`); moves.push({ x: target, z: zEndLim, rapid: false, line: L.length - 1 });
+          L.push(`G1 Z${f3(zStartLim)} F${fr}`); moves.push({ x: target, z: zStartLim, rapid: false, line: L.length - 1 });
+          return;
+        }
+        if (useMacro) {
+          // WHILE 매크로 방식 (직선 트래버스)
+          L.push(`#101 = ${f3(target)}`);
+          L.push(`WHILE [#100 GT #101] DO1`);
+          L.push(`  #100 = #100 - ${f3(inS)}`);
+          L.push(`  IF [#100 LT #101] THEN #100 = #101`);
+          L.push(`  G1 X#100 F${fr}`); const lnInS = L.length - 1;
+          L.push(`  G1 Z${f3(zEndLim)} F${fr}`); const lnTE = L.length - 1;
+          L.push(`  #100 = #100 - ${f3(inE)}`);
+          L.push(`  IF [#100 LT #101] THEN #100 = #101`);
+          L.push(`  G1 X#100 F${fr}`); const lnInE = L.length - 1;
+          L.push(`  G1 Z${f3(zStartLim)} F${fr}`); const lnTS = L.length - 1;
+          L.push(`END1`);
+          let guard = 0;
+          while (curDia > target + 1e-6 && guard < 100000) {
+            guard++;
+            curDia = Math.max(curDia - inS, target);
+            moves.push({ x: curDia, z: zStartLim, rapid: false, line: lnInS });
+            moves.push({ x: curDia, z: zEndLim, rapid: false, line: lnTE });
+            curDia = Math.max(curDia - inE, target);
+            moves.push({ x: curDia, z: zEndLim, rapid: false, line: lnInE });
+            moves.push({ x: curDia, z: zStartLim, rapid: false, line: lnTS });
+          }
+        } else {
+          // 명시적 전개 (직선 트래버스)
+          let guard = 0;
+          while (curDia > target + 1e-6 && guard < 100000) {
+            guard++;
+            curDia = Math.max(curDia - inS, target);
+            L.push(`G1 X${f3(curDia)} F${fr}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+            L.push(`G1 Z${f3(zEndLim)} F${fr}`); moves.push({ x: curDia, z: zEndLim, rapid: false, line: L.length - 1 });
+            curDia = Math.max(curDia - inE, target);
+            L.push(`G1 X${f3(curDia)} F${fr}`); moves.push({ x: curDia, z: zEndLim, rapid: false, line: L.length - 1 });
+            L.push(`G1 Z${f3(zStartLim)} F${fr}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+          }
+        }
+      };
+
+      const tgts: { lbl: string; t: number; f: any }[] = [];
+      if (activeStages.rough) tgts.push({ lbl: 'ROUGH', t: d2 + roughOffset, f: cut.rough_fr });   // 황삭=목표경+황삭옵셋까지
+      if (activeStages.finish) tgts.push({ lbl: 'FINISH', t: d2, f: cut.finish_fr });
+      if (tgts.length) tgts[tgts.length - 1].t = d2; // 최종 단계는 목표경(d2)에 정확히 도달
+      let prevT = d1;
+      for (const s of tgts) { s.t = Math.min(Math.max(s.t, d2), prevT); prevT = s.t; } // 단조감소 + d2 클램프
+      tgts.forEach(s => emitStage(s.lbl, s.t, s.f));
+
+      const spk = Math.round(N(cut.spark_out) || 0);
+      const spF = cut.finish_fr || cut.rough_fr;
+      if (activeStages.spark && spk > 0) {
+        L.push(`(--- SPARK OUT TRAVERSE x${spk}${zigOn ? ' (목표경 직선)' : ''} ---)`);
+        if (zigOn) {
+          for (let k = 0; k < spk; k++) {
+            L.push(`G1 W${sgnExpr(span)} F${spF}`); moves.push({ x: curDia, z: zEndLim, rapid: false, line: L.length - 1 });
+            L.push(`G1 W${sgnExpr(-span)} F${spF}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+          }
+        } else if (useMacro) {
+          L.push(`#102 = 0`);
+          L.push(`WHILE [#102 LT ${spk}] DO2`);
+          L.push(`  G1 Z${f3(zEndLim)} F${spF}`); const lse = L.length - 1;
+          L.push(`  G1 Z${f3(zStartLim)} F${spF}`); const lss = L.length - 1;
+          L.push(`  #102 = #102 + 1`);
+          L.push(`END2`);
+          for (let k = 0; k < spk; k++) {
+            moves.push({ x: curDia, z: zEndLim, rapid: false, line: lse });
+            moves.push({ x: curDia, z: zStartLim, rapid: false, line: lss });
+          }
+        } else {
+          for (let k = 0; k < spk; k++) {
+            L.push(`G1 Z${f3(zEndLim)} F${spF}`); moves.push({ x: curDia, z: zEndLim, rapid: false, line: L.length - 1 });
+            L.push(`G1 Z${f3(zStartLim)} F${spF}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+          }
+        }
+      }
+      // 번개(지그재그)모드 전용 마무리: 플런지식 대기(G4) + 비비기(전구간 직선 왕복)
+      if (activeStages.spark && zigOn) {
+        const dw = N(cut.spark_dwell) || 0;
+        const rubN = Math.round(N(cut.spark_rub_n) || 0);
+        const rubF = cut.spark_rub_feed || spF;
+        if (dw > 0) { L.push(`(--- SPARK DWELL ${dw}s ---)`); L.push(`G4 X${dw.toFixed(1)}`); moves.push({ x: curDia, z: zStartLim, dwell: dw, rapid: false, line: L.length - 1 }); }
+        if (rubN > 0) {
+          L.push(`(--- SPARK RUB 전구간 비비기 x${rubN} ---)`);
+          for (let k = 0; k < rubN; k++) {
+            L.push(`G1 Z${f3(zEndLim)} F${rubF}`); moves.push({ x: curDia, z: zEndLim, rapid: false, line: L.length - 1 });
+            L.push(`G1 Z${f3(zStartLim)} F${rubF}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+          }
+        }
+      }
+
+      L.push(`G0 X${xRetract}`);
+      moves.push({ x: parseFloat(xRetract), z: zStartLim, rapid: true, line: L.length - 1 });
+      L.push('M5 P12'); L.push('M5 P11'); L.push('M9'); L.push('G28 U0 W0'); L.push('M30'); L.push('%');
+
+      const sim = { moves, wheelOd, wheelW: N(wheel.wheel_width) > 0 ? N(wheel.wheel_width) : 5, wheelWReal: N(wheel.wheel_width), d1, d2, zMin: Math.min(zStartLim, zEndLim), zMax: Math.max(zStartLim, zEndLim), grindWidth: Math.abs(ze - zs), offset: offsetMode, bAngle: bAng, bodyDir: (ze >= zs ? 1 : -1) };
+      return { code: L.join('\n'), sim };
+    };
+
+    const handleGenerateNc = () => {
+      if (selectedMenu === 'od_plunge') {
+        const r = generateODPlunge();
+        setNcCode(r.code); setNcSim(r.sim);
+      } else if (selectedMenu === 'od_traverse') {
+        const r = generateODTraverse();
+        setNcCode(r.code); setNcSim(r.sim);
+      } else {
+        setNcCode(`(${currentMenuInfo?.label ?? ''} 사이클은 아직 NC 생성 미구현)\n(현재 OD 플런지 / OD 트래버스 지원)`);
+        setNcSim(null);
+      }
+      setShowNc(true);
+    };
+
     // 기능 ON/OFF 토글 노출 판단 로직
     const isRotaryTabOrMenu = activeTab === 'dresser_rotary' || selectedMenu === 'dress_rotary';
     const showHeaderToggle = activeTab === 'gauge' || isRotaryTabOrMenu;
     const toggleValue = isRotaryTabOrMenu ? useRotary : useGauge;
     const toggleSetter = isRotaryTabOrMenu ? setUseRotary : setUseGauge;
     const isOffStateBanner = (activeTab === 'gauge' && !useGauge) || (isRotaryTabOrMenu && !useRotary);
+
+    // 현재 사이클 입력값 상황판 데이터 (형상+가공조건 전체, 활성 단계만)
+    const geoMap: any = {
+      od_plunge: odPlungeGeometryFields, od_traverse: odTraverseGeometryFields,
+    };
+    const cutMap: any = {
+      od_plunge: odPlungeCuttingFields, od_traverse: odTraverseCuttingFields,
+    };
+    const boardFields = [...(geoMap[selectedMenu] || []), ...(cutMap[selectedMenu] || [])]
+      .filter((f: any) => f && f.value !== undefined && f.type !== 'stageToggle' && f.type !== 'radioGroup' && (!f.stage || (activeStages as any)[f.stage]));
+    const shortLabel = (s: string) => (s || '').split(' (')[0];
 
     return (
       <div className="flex flex-col h-full bg-slate-100">
@@ -651,32 +818,10 @@ const App = () => {
 
         <div className="flex flex-1 overflow-hidden">
           <aside className="w-72 bg-white border-r border-slate-200 p-5 space-y-4 z-0 overflow-y-auto">
-            <div className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2 mt-2 px-1">Preparation</div>
-            <div className="space-y-2">
-              {SETUP_TYPES.map((type) => {
-                const Icon = type.icon;
-                return (
-                  <button
-                    key={type.id}
-                    onClick={() => handleMenuChange(type.id)}
-                    className={`w-full text-left p-3 rounded-xl transition-all border-2 flex items-center ${
-                      selectedMenu === type.id ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-sm' : 'bg-white border-slate-100 text-slate-600 hover:border-slate-300'
-                    }`}
-                  >
-                    <Icon size={20} className={`mr-3 ${selectedMenu === type.id ? 'text-emerald-600' : 'text-slate-400'}`} />
-                    <div>
-                      <div className="font-bold text-sm">{type.label}</div>
-                      <div className={`text-[10px] ${selectedMenu === type.id ? 'text-emerald-600/80' : 'text-slate-400'}`}>{type.desc}</div>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-
-            <div className="pt-4 mt-4 border-t border-slate-100">
+            <div>
               <div className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3 px-1">Grinding Cycles</div>
               <div className="space-y-2">
-                {CYCLE_TYPES.filter(c => !c.isDress).map((type) => {
+                {CYCLE_TYPES.map((type) => {
                   const Icon = type.icon;
                   return (
                     <button
@@ -696,31 +841,82 @@ const App = () => {
                 })}
               </div>
             </div>
-
-            <div className="pt-4 mt-4 border-t border-slate-100">
-              <div className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3 px-1">Dressing Cycles</div>
-              {CYCLE_TYPES.filter(c => c.isDress).map((type) => {
-                const Icon = type.icon;
-                return (
-                  <button
-                    key={type.id}
-                    onClick={() => handleMenuChange(type.id)}
-                    className={`w-full text-left p-3 rounded-xl transition-all border-2 flex items-center ${
-                      selectedMenu === type.id ? 'bg-amber-50 border-amber-500 text-amber-700 shadow-sm' : 'bg-white border-slate-100 text-slate-600 hover:border-slate-300'
-                    }`}
-                  >
-                    <Icon size={20} className={`mr-3 ${selectedMenu === type.id ? 'text-amber-600' : 'text-slate-400'}`} />
-                    <div>
-                      <div className="font-bold text-sm">{type.label}</div>
-                      <div className={`text-[10px] ${selectedMenu === type.id ? 'text-amber-600/80' : 'text-slate-400'}`}>{type.desc}</div>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
           </aside>
 
           <main className="flex-1 flex flex-col bg-slate-50">
+            {/* 셋업 요약칩 (사이클 우선 운영: 공유 셋업을 사이클 안에서 한눈에 + 인라인 편집) */}
+            {!isSetupMode && (
+              <div className="px-8 pt-4">
+                <div className="flex items-center gap-2 flex-wrap bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-1">셋업</span>
+                  {([
+                    { label: '휠Ø', val: paramValues['tool_setup:wheel_od'] ?? '350.000', def: !('tool_setup:wheel_od' in paramValues) },
+                    { label: '휠폭', val: paramValues['tool_setup:wheel_width'] ?? '20.000', def: !('tool_setup:wheel_width' in paramValues) },
+                    { label: 'T', val: paramValues['tool_setup:t_code'] ?? '0101', def: !('tool_setup:t_code' in paramValues) },
+                    { label: '옵셋', val: offsetMode === 'x_plus' ? '외경X+' : offsetMode === 'x_minus' ? '내경X-' : '센터', def: offsetMode === 'x_plus' },
+                    { label: 'B각', val: bAngle, def: parseFloat(bAngle) === 0 },
+                    { label: 'G', val: paramValues['work_coord:g_code'] ?? '54', def: !('work_coord:g_code' in paramValues) },
+                  ]).map((c, i) => (
+                    <button key={i} onClick={() => setShowSetupPanel(true)} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-bold transition-all ${c.def ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-slate-50 border-slate-200 text-slate-700'}`} title={c.def ? '기본값 (확인/수정 권장)' : '설정됨'}>
+                      <span className="text-[10px] text-slate-400">{c.label}</span>{c.val}
+                    </button>
+                  ))}
+                  <button onClick={() => setShowSetupPanel(s => !s)} className="ml-auto flex items-center gap-1 px-3 py-1 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700">
+                    <Settings size={13} /> 셋업 편집 {showSetupPanel ? '▴' : '▾'}
+                  </button>
+                </div>
+                {showSetupPanel && (
+                  <div className="mt-2 bg-white border border-slate-200 rounded-xl p-4 shadow-sm grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {([
+                      { k: 'tool_setup:wheel_od', lbl: '휠 외경 (mm)', def: '350.000' },
+                      { k: 'tool_setup:wheel_width', lbl: '휠 폭 (mm)', def: '20.000' },
+                      { k: 'tool_setup:t_code', lbl: '공구번호 (T)', def: '0101' },
+                      { k: 'work_coord:g_code', lbl: '워크좌표 (G)', def: '54' },
+                    ]).map((f, i) => (
+                      <label key={i} className="flex flex-col gap-1">
+                        <span className="text-[10px] font-bold text-slate-500">{f.lbl}</span>
+                        <input value={paramValues[f.k] ?? f.def} onChange={(e) => setParamValues((p: any) => ({ ...p, [f.k]: e.target.value }))} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono text-slate-800 focus:outline-none focus:bg-white focus:border-blue-500" />
+                      </label>
+                    ))}
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold text-slate-500">B축 각도 (deg)</span>
+                      <input value={bAngle} onChange={(e) => setBAngle(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono text-slate-800 focus:outline-none focus:bg-white focus:border-blue-500" />
+                    </label>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold text-slate-500">옵셋 기준</span>
+                      <div className="flex gap-1">
+                        {[{ v: 'x_plus', l: '외경X+' }, { v: 'x_minus', l: '내경X-' }, { v: 'center', l: '센터' }].map(o => (
+                          <button key={o.v} onClick={() => setOffsetMode(o.v)} className={`flex-1 py-2 text-xs font-bold rounded-lg border ${offsetMode === o.v ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>{o.l}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="col-span-2 md:col-span-3 flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100 mt-1">
+                      <span className="text-[11px] font-bold text-slate-500">상세 설정:</span>
+                      <button onClick={() => handleMenuChange('tool_setup')} className="px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-100 flex items-center gap-1"><PenTool size={13} /> 공구 설정 (드레서·옵셋) →</button>
+                      <button onClick={() => handleMenuChange('work_coord')} className="px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-100 flex items-center gap-1"><Crosshair size={13} /> 워크좌표 (원점·측정) →</button>
+                      <span className="text-[11px] text-slate-400 flex items-center gap-1"><Info size={12} /> 셋업은 모든 사이클 공유</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {/* 현재 사이클 입력값 상황판 */}
+            {!isSetupMode && boardFields.length > 0 && (
+              <div className="px-8 pt-2">
+                <div className="flex items-center gap-1.5 flex-wrap bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-1">현재 사이클</span>
+                  {boardFields.map((f: any, i: number) => {
+                    const v = paramValues[`${selectedMenu}:${f.id}`] ?? f.value;
+                    const edited = `${selectedMenu}:${f.id}` in paramValues;
+                    return (
+                      <span key={i} onMouseEnter={() => setActiveField(f.id)} className={`flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-bold cursor-default ${edited ? 'bg-white border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-600'}`} title={f.desc}>
+                        <span className="text-[9px] text-slate-400">{shortLabel(f.label)}</span>{v}<span className="text-[9px] text-slate-400">{f.unit}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <nav className="flex px-8 pt-6 space-x-2">
               {getTabs().map((tab) => {
                 let activeColorClass = 'bg-white border-blue-100 border-t-blue-500 text-blue-600 shadow-sm';
@@ -938,151 +1134,14 @@ const App = () => {
                   </svg>
                 )}
 
-                {/* 3. 드레싱 싱글포인트 다이어그램 */}
-                {selectedMenu === 'dress_single' && activeTab !== 'gauge' && (
-                  <svg viewBox="0 0 400 200" className="w-full max-w-md drop-shadow-sm">
-                    <path d="M 50,20 L 350,20 L 350,160 L 260,160 L 260,70 L 50,70 Z" fill="#f1f5f9" stroke="#94a3b8" strokeWidth="2" />
-                    <text x="150" y="45" fill="#94a3b8" fontSize="12" fontWeight="bold" textAnchor="middle">Grinding Wheel</text>
-                    <path d="M 180,85 L 200,85 L 200,140 L 245,140 L 245,160 L 180,160 Z" fill="#cbd5e1" stroke="#64748b" strokeWidth="2" />
-                    <polygon points="180,85 200,85 190,70" fill={dressDirection === 'horizontal' ? '#d97706' : '#94a3b8'} />
-                    <polygon points="245,140 245,160 260,150" fill={dressDirection === 'vertical' ? '#d97706' : '#94a3b8'} />
 
-                    {dressDirection === 'horizontal' && (
-                      <g>
-                        <path d="M 130,95 L 240,95" stroke="#f59e0b" strokeWidth="2" strokeDasharray="4,4" fill="none" />
-                        <path d="M 130,95 L 240,80" stroke="#ef4444" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                        <path d="M 230,78 L 240,80 L 235,88" stroke="#ef4444" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                        <text x="155" y="88" fill="#f59e0b" fontSize="10" fontWeight="bold">Angle(θ)</text>
-                        <text x="185" y="115" fill="#ef4444" fontSize="12" fontWeight="bold" textAnchor="middle">사선 방향 (Traverse)</text>
-                      </g>
-                    )}
-                    {dressDirection === 'vertical' && (
-                      <g>
-                        <path d="M 275,100 L 275,180 M 270,105 L 275,100 L 280,105 M 270,175 L 275,180 L 280,175" stroke="#ef4444" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                        <text x="330" y="145" fill="#ef4444" fontSize="12" fontWeight="bold" textAnchor="middle">세로 방향 (Plunge)</text>
-                      </g>
-                    )}
-                  </svg>
-                )}
-
-                {/* 3-2. 드레싱 로터리 다이어그램 신규 추가 */}
-                {selectedMenu === 'dress_rotary' && activeTab !== 'gauge' && useRotary && (
-                  <svg viewBox="0 0 400 200" className="w-full max-w-md drop-shadow-sm">
-                    <path d="M 50,20 L 350,20 L 350,160 L 260,160 L 260,70 L 50,70 Z" fill="#f1f5f9" stroke="#94a3b8" strokeWidth="2" />
-                    <text x="150" y="45" fill="#94a3b8" fontSize="12" fontWeight="bold" textAnchor="middle">Grinding Wheel</text>
-                    
-                    {/* 로터리 드레서 */}
-                    <circle cx="230" cy="130" r="30" fill="#cbd5e1" stroke="#64748b" strokeWidth="2" />
-                    <circle cx="230" cy="130" r="8" fill="#94a3b8" />
-                    <path d="M 230,110 A 20 20 0 0 1 250 130" stroke="#f59e0b" strokeWidth="2" fill="none" strokeLinecap="round" />
-                    
-                    {dressDirection === 'horizontal' && (
-                      <g>
-                        <path d="M 170,145 L 280,145" stroke="#f59e0b" strokeWidth="2" strokeDasharray="4,4" fill="none" />
-                        <path d="M 170,145 L 280,130" stroke="#ef4444" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                        <path d="M 270,128 L 280,130 L 275,138" stroke="#ef4444" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                        <text x="195" y="138" fill="#f59e0b" fontSize="10" fontWeight="bold">Angle(θ)</text>
-                        <text x="225" y="180" fill="#ef4444" fontSize="12" fontWeight="bold" textAnchor="middle">사선 방향 (Traverse)</text>
-                      </g>
-                    )}
-                    {dressDirection === 'vertical' && (
-                      <g>
-                        <path d="M 285,100 L 285,160 M 280,105 L 285,100 L 290,105 M 280,155 L 285,160 L 290,155" stroke="#ef4444" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                        <text x="335" y="135" fill="#ef4444" fontSize="12" fontWeight="bold" textAnchor="middle">세로 방향 (Plunge)</text>
-                      </g>
-                    )}
-                  </svg>
-                )}
-
-                {/* 4. 외경 연삭 플런지 (OD Plunge) 다이어그램 */}
-                {selectedMenu === 'od_plunge' && activeTab !== 'gauge' && (
-                  <svg viewBox="0 0 400 200" className="w-full max-w-md drop-shadow-sm">
-                    <rect x="50" y="100" width="200" height="40" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="2" />
-                    <text x="150" y="125" fill="#64748b" fontSize="12" fontWeight="bold" textAnchor="middle">Workpiece</text>
-                    <circle cx="250" cy="50" r="40" fill="#3b82f6" fillOpacity="0.1" stroke="#3b82f6" strokeWidth="2" />
-                    <text x="250" y="55" fill="#3b82f6" fontSize="12" fontWeight="bold" textAnchor="middle">Wheel</text>
-                    <path d="M 250,95 L 250,110 M 245,105 L 250,110 L 255,105" stroke="#ef4444" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                    <text x="305" y="100" fill="#ef4444" fontSize="12" fontWeight="bold" textAnchor="middle">Plunge Feed</text>
-                  </svg>
-                )}
-
-                {/* 4-2. 외경 연삭 트래버스 (OD Traverse) 다이어그램 */}
-                {selectedMenu === 'od_traverse' && activeTab !== 'gauge' && (
-                  <svg viewBox="0 0 400 200" className="w-full max-w-md drop-shadow-sm">
-                    <rect x="40" y="100" width="280" height="40" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="2" />
-                    <text x="180" y="125" fill="#64748b" fontSize="12" fontWeight="bold" textAnchor="middle">Workpiece (Traverse)</text>
-                    <circle cx="180" cy="50" r="40" fill="#3b82f6" fillOpacity="0.1" stroke="#3b82f6" strokeWidth="2" />
-                    <path d="M 120,70 L 240,70 M 125,65 L 120,70 L 125,75 M 235,65 L 240,70 L 235,75" stroke="#ef4444" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                    
-                    <path d="M 120,70 L 240,55" stroke="#f59e0b" strokeWidth="2" strokeDasharray="4,4" fill="none" />
-                    <text x="145" y="55" fill="#f59e0b" fontSize="10" fontWeight="bold">Angle(θ)</text>
-                    
-                    <path d="M 120,80 L 120,95 M 115,90 L 120,95 L 125,90" stroke="#f59e0b" strokeWidth="2" fill="none" strokeLinecap="round" />
-                    <path d="M 240,80 L 240,95 M 235,90 L 240,95 L 245,90" stroke="#f59e0b" strokeWidth="2" fill="none" strokeLinecap="round" />
-                    <text x="180" y="45" fill="#ef4444" fontSize="12" fontWeight="bold" textAnchor="middle">Z-Axis Traverse</text>
-                    <text x="120" y="105" fill="#f59e0b" fontSize="10" fontWeight="bold" textAnchor="middle">Infeed</text>
-                  </svg>
-                )}
+                {/* 외경 연삭 (Plunge/Traverse) 치수 다이어그램 - 입력 포커스/호버 시 해당 부위 하이라이트 */}
+                {(selectedMenu === 'od_plunge' || selectedMenu === 'od_traverse') && activeTab !== 'gauge' && (() => {
+                  const dgf: any[] = selectedMenu === 'od_traverse' ? odTraverseGeometryFields : odPlungeGeometryFields;
+                  const dgn = (id: string) => { const f: any = dgf.find((x: any) => x.id === id); return f ? parseFloat(gv(f)) : 0; };
+                  return <CycleDiagram menu={selectedMenu} tab={activeTab} field={activeField} zs={dgn('z_start')} ze={dgn('z_end')} d1v={dgn('d1')} d2v={dgn('d2')} />;
+                })()}
                 
-                {/* 5. 내경 연삭 플런지 (ID Plunge) 다이어그램 */}
-                {selectedMenu === 'id_plunge' && activeTab !== 'gauge' && (
-                  <svg viewBox="0 0 400 200" className="w-full max-w-md drop-shadow-sm">
-                    <rect x="50" y="30" width="200" height="40" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="2" />
-                    <rect x="50" y="130" width="200" height="40" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="2" />
-                    <text x="150" y="20" fill="#64748b" fontSize="12" fontWeight="bold" textAnchor="middle">Workpiece (ID Plunge)</text>
-                    <circle cx="150" cy="100" r="28" fill="#3b82f6" fillOpacity="0.1" stroke="#3b82f6" strokeWidth="2" />
-                    <text x="150" y="105" fill="#3b82f6" fontSize="12" fontWeight="bold" textAnchor="middle">Wheel</text>
-                    <path d="M 150,128 L 150,145 M 145,140 L 150,145 L 155,140" stroke="#ef4444" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                    <text x="215" y="145" fill="#ef4444" fontSize="12" fontWeight="bold" textAnchor="middle">Plunge Feed</text>
-                  </svg>
-                )}
-
-                {/* 5-2. 내경 연삭 트래버스 (ID Traverse) 다이어그램 */}
-                {selectedMenu === 'id_traverse' && activeTab !== 'gauge' && (
-                  <svg viewBox="0 0 400 200" className="w-full max-w-md drop-shadow-sm">
-                    <rect x="40" y="30" width="280" height="40" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="2" />
-                    <rect x="40" y="130" width="280" height="40" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="2" />
-                    <text x="180" y="20" fill="#64748b" fontSize="12" fontWeight="bold" textAnchor="middle">Workpiece (ID Traverse)</text>
-                    <circle cx="180" cy="100" r="28" fill="#3b82f6" fillOpacity="0.1" stroke="#3b82f6" strokeWidth="2" />
-                    <path d="M 120,100 L 240,100 M 125,95 L 120,100 L 125,105 M 235,95 L 240,100 L 235,105" stroke="#ef4444" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                    
-                    <path d="M 120,100 L 240,115" stroke="#f59e0b" strokeWidth="2" strokeDasharray="4,4" fill="none" />
-                    <text x="145" y="120" fill="#f59e0b" fontSize="10" fontWeight="bold">Angle(θ)</text>
-
-                    <path d="M 120,115 L 120,130 M 115,125 L 120,130 L 125,125" stroke="#f59e0b" strokeWidth="2" fill="none" strokeLinecap="round" />
-                    <path d="M 240,115 L 240,130 M 235,125 L 240,130 L 245,125" stroke="#f59e0b" strokeWidth="2" fill="none" strokeLinecap="round" />
-                    <text x="180" y="90" fill="#ef4444" fontSize="12" fontWeight="bold" textAnchor="middle">Z-Axis Traverse</text>
-                    <text x="120" y="145" fill="#f59e0b" fontSize="10" fontWeight="bold" textAnchor="middle">Infeed</text>
-                  </svg>
-                )}
-
-                {/* 6. 단면 연삭 플런지 (Face Plunge) 다이어그램 */}
-                {selectedMenu === 'face_plunge' && activeTab !== 'gauge' && (
-                  <svg viewBox="0 0 400 200" className="w-full max-w-md drop-shadow-sm">
-                    <rect x="50" y="140" width="200" height="40" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="2" />
-                    <text x="150" y="165" fill="#64748b" fontSize="12" fontWeight="bold" textAnchor="middle">Workpiece (Face Plunge)</text>
-                    <rect x="130" y="40" width="40" height="90" fill="#3b82f6" fillOpacity="0.1" stroke="#3b82f6" strokeWidth="2" />
-                    <text x="150" y="85" fill="#3b82f6" fontSize="12" fontWeight="bold" textAnchor="middle">Wheel</text>
-                    <path d="M 190,90 L 190,130 M 185,125 L 190,130 L 195,125" stroke="#ef4444" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                    <text x="240" y="115" fill="#ef4444" fontSize="12" fontWeight="bold" textAnchor="middle">Plunge Feed (Z)</text>
-                  </svg>
-                )}
-
-                {/* 6-2. 단면 연삭 트래버스 (Face Traverse) 다이어그램 */}
-                {selectedMenu === 'face_traverse' && activeTab !== 'gauge' && (
-                  <svg viewBox="0 0 400 200" className="w-full max-w-md drop-shadow-sm">
-                    <rect x="50" y="140" width="300" height="40" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="2" />
-                    <text x="200" y="165" fill="#64748b" fontSize="12" fontWeight="bold" textAnchor="middle">Workpiece (Face Traverse)</text>
-                    <rect x="180" y="40" width="40" height="90" fill="#3b82f6" fillOpacity="0.1" stroke="#3b82f6" strokeWidth="2" />
-                    
-                    <path d="M 120,80 L 280,80 M 125,75 L 120,80 L 125,85 M 275,75 L 280,80 L 275,85" stroke="#ef4444" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                    <text x="200" y="70" fill="#ef4444" fontSize="12" fontWeight="bold" textAnchor="middle">X-Axis Traverse</text>
-                    
-                    <path d="M 100,120 L 100,135 M 95,130 L 100,135 L 105,130" stroke="#f59e0b" strokeWidth="2" fill="none" strokeLinecap="round" />
-                    <path d="M 300,120 L 300,135 M 295,130 L 300,135 L 305,130" stroke="#f59e0b" strokeWidth="2" fill="none" strokeLinecap="round" />
-                    <text x="100" y="110" fill="#f59e0b" fontSize="10" fontWeight="bold" textAnchor="middle">Infeed (Z)</text>
-                  </svg>
-                )}
               </div>
 
               {/* 입력 폼 영역 */}
@@ -1143,19 +1202,6 @@ const App = () => {
                           <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all shadow-inner peer-checked:bg-amber-500"></div>
                           <span className={`ml-2 text-xs font-black uppercase ${useRotaryOrigin ? 'text-amber-600' : 'text-slate-400'}`}>
                             {useRotaryOrigin ? 'ON' : 'OFF'}
-                          </span>
-                        </label>
-                      ) : activeTab === 'cutting' && !isDressingMode ? (
-                        <label className="relative inline-flex items-center cursor-pointer group">
-                          <input 
-                            type="checkbox" 
-                            className="sr-only peer" 
-                            checked={useGapReturn} 
-                            onChange={() => setUseGapReturn(!useGapReturn)} 
-                          />
-                          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all shadow-inner peer-checked:bg-blue-500"></div>
-                          <span className={`ml-2 text-xs font-black uppercase ${useGapReturn ? 'text-blue-600' : 'text-slate-400'}`}>
-                            Gap Return {useGapReturn ? 'ON' : 'OFF'}
                           </span>
                         </label>
                       ) : (
@@ -1258,7 +1304,7 @@ const App = () => {
                                        field.id === 'gap_sensor' ? setGapSensor : setMeasureMode;
 
                         return (
-                          <div key={idx} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm mb-6">
+                          <div key={idx} onMouseEnter={() => setActiveField(field.id)} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm mb-6">
                             <div className="flex justify-between items-center mb-2">
                               <label className="text-xs font-bold text-slate-700">{field.label}</label>
                             </div>
@@ -1288,6 +1334,20 @@ const App = () => {
                       }
 
                       // 기본 텍스트 입력 필드
+                      const fieldKey = `${selectedMenu}:${field.id}`;
+                      const curStr = (paramValues[fieldKey] ?? field.value) as string;
+                      const hasCalc = (field.id === 'work_rpm' || field.id === 'wheel_vc' || field.id === 'wheel_rpm' || field.id === 'rotary_rpm');
+                      const numVal = parseFloat(curStr);
+                      const isNumeric = !isNaN(numVal) && field.unit !== 'G' && field.unit !== 'T';
+                      const decs = (String(field.value).split('.')[1] || '').length;
+                      const stepSize = field.unit === 'rpm' ? 10 : field.unit === 'mm/min' ? (numVal >= 10 ? 10 : 0.1) : field.unit === 'mm' ? 0.1 : field.unit === '%' ? 0.1 : 1;
+                      const noNeg = (field.unit === 'rpm' || field.unit === 'mm/min' || field.unit === 'm/s' || field.unit === '%');
+                      const setTyped = (v: string) => { handleFieldChange(field.id, v); setParamValues((prev: any) => ({ ...prev, [fieldKey]: v })); };
+                      const applyStep = (dir: number) => {
+                        let nv = (isNaN(numVal) ? 0 : numVal) + dir * stepSize;
+                        if (noNeg && nv < 0) nv = 0;
+                        setTyped(nv.toFixed(decs));
+                      };
                       return (
                         <div key={idx} className={`bg-white rounded-xl border p-4 shadow-sm transition-all duration-300 ${showMeasureEffect && (field.id === 'z_offset' || field.id === 'x_offset') ? 'border-emerald-400 bg-emerald-50/30' : 'border-slate-200'}`}>
                           <div className="flex justify-between items-center mb-2">
@@ -1295,25 +1355,36 @@ const App = () => {
                             <span className="text-[10px] font-mono text-slate-400 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded">{field.unit}</span>
                           </div>
                           <div className="relative">
-                            <input 
-                              type="text" 
-                              defaultValue={field.value} 
-                              onChange={(e) => handleFieldChange(field.id, e.target.value)}
-                              className={`w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 px-4 text-lg font-mono focus:outline-none focus:bg-white transition-colors ${showMeasureEffect && (field.id === 'z_offset' || field.id === 'x_offset') ? 'text-emerald-700 font-black' : 'text-slate-800'} ${focusColor} ${(field.id === 'work_rpm' || field.id === 'wheel_vc' || field.id === 'wheel_rpm' || field.id === 'rotary_rpm') ? 'pr-14' : ''}`}
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={curStr}
+                              onFocus={() => setActiveField(field.id)}
+                              onMouseEnter={() => setActiveField(field.id)}
+                              onChange={(e) => setTyped(e.target.value)}
+                              className={`w-full bg-slate-50 border border-slate-200 rounded-lg py-2.5 px-4 text-lg font-mono focus:outline-none focus:bg-white transition-colors ${showMeasureEffect && (field.id === 'z_offset' || field.id === 'x_offset') ? 'text-emerald-700 font-black' : 'text-slate-800'} ${focusColor} ${(hasCalc && isNumeric) ? 'pr-28' : (hasCalc || isNumeric) ? 'pr-16' : ''}`}
                             />
-                            {(field.id === 'work_rpm' || field.id === 'wheel_vc' || field.id === 'wheel_rpm' || field.id === 'rotary_rpm') && (
-                              <button 
-                                onClick={() => openCalculator(field)}
-                                className={`absolute right-2 top-1.5 bottom-1.5 px-2 rounded-lg transition-all border shadow-sm flex items-center justify-center ${
-                                  activeTab === 'gauge' ? 'text-indigo-600 hover:bg-indigo-50 border-indigo-100' :
-                                  isSetupMode ? 'text-emerald-600 hover:bg-emerald-50 border-emerald-100' :
-                                  isDressingMode ? 'text-amber-600 hover:bg-amber-50 border-amber-100' :
-                                  'text-blue-600 hover:bg-blue-50 border-blue-100'
-                                }`}
-                              >
-                                <Activity size={18} />
-                              </button>
-                            )}
+                            <div className="absolute right-1.5 top-1.5 bottom-1.5 flex items-center gap-1">
+                              {hasCalc && (
+                                <button
+                                  onClick={() => openCalculator(field)}
+                                  className={`px-2 h-full rounded-lg transition-all border shadow-sm flex items-center justify-center ${
+                                    activeTab === 'gauge' ? 'text-indigo-600 hover:bg-indigo-50 border-indigo-100' :
+                                    isSetupMode ? 'text-emerald-600 hover:bg-emerald-50 border-emerald-100' :
+                                    isDressingMode ? 'text-amber-600 hover:bg-amber-50 border-amber-100' :
+                                    'text-blue-600 hover:bg-blue-50 border-blue-100'
+                                  }`}
+                                >
+                                  <Activity size={18} />
+                                </button>
+                              )}
+                              {isNumeric && (
+                                <div className="flex flex-col h-full justify-center border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm">
+                                  <button type="button" aria-label="증가" onClick={() => applyStep(1)} className="flex-1 px-1.5 flex items-center justify-center text-slate-500 hover:bg-blue-50 hover:text-blue-600 active:bg-blue-100"><ChevronUp size={14} /></button>
+                                  <button type="button" aria-label="감소" onClick={() => applyStep(-1)} className="flex-1 px-1.5 flex items-center justify-center text-slate-500 hover:bg-blue-50 hover:text-blue-600 active:bg-blue-100 border-t border-slate-200"><ChevronDown size={14} /></button>
+                                </div>
+                              )}
+                            </div>
                           </div>
                           {field.desc && (
                               <div className="flex items-start text-[10px] text-slate-500 bg-slate-50 p-2 rounded-lg mt-2">
@@ -1325,6 +1396,36 @@ const App = () => {
                       )
                       })}
                       
+                      {/* 플런지 툴패스 (자동분할 없음 · 가공시작부터 휠폭씩, 남으면 추가) */}
+                      {selectedMenu === 'od_plunge' && activeTab === 'geometry' && (() => {
+                        const gwv = Math.abs(parseFloat(paramValues['od_plunge:width'] ?? '25.000') || 0);
+                        const wwv = parseFloat(paramValues['tool_setup:wheel_width'] ?? '20.000') || 0;
+                        const eff = plungePaths.length > 0 ? plungePaths : [Math.min(wwv || gwv, gwv)]; // 표시용 패스 목록
+                        const sumW = eff.reduce((a, b) => a + (Number(b) || 0), 0);
+                        const remain = gwv - sumW;
+                        const commit = (arr: number[]) => setPlungePaths(arr);
+                        return (
+                          <div className="mt-2 p-4 bg-blue-50/40 border border-blue-200 rounded-xl space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-black text-blue-700">플런지 툴패스 (가공길이 {gwv} / 휠폭 {wwv})</span>
+                              <span className="text-[10px] font-mono text-slate-500">{eff.length}패스 · 남은 {remain.toFixed(2)}mm</span>
+                            </div>
+                            <div className="space-y-1">
+                              {eff.map((w, i) => (
+                                <div key={i} className="flex items-center gap-2">
+                                  <span className="text-[11px] font-bold text-slate-500 w-12">패스{i + 1}</span>
+                                  <input type="number" value={w} onChange={(e) => { const a = [...eff]; a[i] = parseFloat(e.target.value) || 0; commit(a); }} className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm font-mono text-slate-800 focus:outline-none focus:border-blue-500" />
+                                  <span className={`text-[10px] ${Number(w) > wwv + 1e-6 ? 'text-rose-500 font-bold' : 'text-slate-400'}`}>mm {Number(w) > wwv + 1e-6 ? '(휠폭 초과!)' : ''}</span>
+                                  {eff.length > 1 && <button onClick={() => commit(eff.filter((_, j) => j !== i))} className="text-slate-400 hover:text-rose-500"><Trash2 size={12} /></button>}
+                                </div>
+                              ))}
+                            </div>
+                            <button onClick={() => commit([...eff, Math.min(wwv || gwv, Math.max(0.001, remain))])} disabled={remain <= 0.001} className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${remain > 0.001 ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}><Plus size={12} /> 툴패스 추가</button>
+                            <div className="text-[10px] text-slate-500">각 패스 = 가공시작에서 이어서 해당 길이만큼 황삭+정삭 플런지. 길이는 휠폭 이하로 입력하세요.</div>
+                          </div>
+                        );
+                      })()}
+
                       {/* 가공 좌표 계산 결과 요약 (Plunge 전용) */}
                       {(selectedMenu === 'od_plunge' || selectedMenu === 'id_plunge' || selectedMenu === 'face_plunge') && activeTab === 'geometry' && (() => {
                         let startX = '50.000';
@@ -1391,9 +1492,16 @@ const App = () => {
 
         <footer className="h-20 bg-white border-t border-slate-200 flex items-center justify-between px-8 z-10">
           <div className="flex space-x-3">
-            <button className="flex items-center px-6 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 font-bold text-sm hover:bg-slate-50 transition-all">
+            <button onClick={handleGenerateNc} className="flex items-center px-6 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 font-bold text-sm hover:bg-slate-50 transition-all">
               <FileText size={16} className="mr-2" /> NC 코드
             </button>
+            {selectedMenu === 'od_traverse' && (
+              <div className="flex items-center bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold overflow-hidden">
+                <span className="px-2.5 text-slate-400">출력</span>
+                <button onClick={() => setTravUseMacro(true)} className={`px-3 py-2.5 transition-colors ${travUseMacro ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-200'}`}>WHILE</button>
+                <button onClick={() => setTravUseMacro(false)} className={`px-3 py-2.5 transition-colors ${!travUseMacro ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-200'}`}>전개</button>
+              </div>
+            )}
           </div>
           <div className="flex space-x-3">
             <button className={`px-10 py-3 text-white rounded-xl font-black text-sm transition-all flex items-center 
@@ -1408,7 +1516,8 @@ const App = () => {
 
   return (
     <div className="h-screen w-full overflow-hidden select-none font-sans">
-      {view === 'list' ? <ProjectListPage /> : <CycleEditorPage />}
+      {/* 컴포넌트를 함수로 호출(<X/> 아님): App 리렌더 시 입력창 리마운트/포커스 해제 방지 */}
+      {view === 'list' ? ProjectListPage() : CycleEditorPage()}
 
       {/* --- 계산기 모달 --- */}
       {showCalculator && (
@@ -1560,6 +1669,56 @@ const App = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* --- NC 코드 출력 모달 --- */}
+      {showNc && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[85vh]">
+            <header className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <h3 className="font-black text-slate-800 flex items-center tracking-tight">
+                <FileText size={18} className="mr-2 text-blue-600" />
+                NC 코드 (FANUC / SMX)
+              </h3>
+              <button onClick={() => setShowNc(false)} className="p-1 hover:bg-slate-200 rounded-full transition-colors">
+                <Trash2 size={18} className="text-slate-400" />
+              </button>
+            </header>
+            <div className="p-6 overflow-auto">
+              <pre className="bg-slate-900 text-slate-100 rounded-xl p-4 text-xs font-mono leading-relaxed whitespace-pre overflow-auto">{ncCode}</pre>
+              {ncCode.includes('확인필요') && (
+                <div className="flex items-start text-[11px] text-amber-700 bg-amber-50 border border-amber-200 p-3 rounded-lg mt-4">
+                  <AlertCircle size={14} className="mr-2 mt-0.5 shrink-0 text-amber-500" />
+                  <span className="leading-tight">(***확인필요***) 표시 항목은 실제 설비/매크로 사양 확인 후 확정이 필요합니다.</span>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex space-x-3 bg-slate-50/50">
+              <button onClick={() => setShowNc(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-black rounded-xl hover:bg-slate-200 transition-all uppercase tracking-widest text-[11px]">
+                닫기
+              </button>
+              {ncSim && (
+                <button
+                  onClick={() => setShowSim(true)}
+                  className="flex-[2] py-3 bg-amber-500 hover:bg-amber-400 text-slate-900 font-black rounded-xl shadow-lg shadow-amber-200 hover:scale-[1.02] active:scale-95 transition-all uppercase tracking-widest text-[11px] flex items-center justify-center gap-2"
+                >
+                  <Activity size={16} className="mr-1" /> 시뮬레이션
+                </button>
+              )}
+              <button
+                onClick={() => { navigator.clipboard?.writeText(ncCode); }}
+                className="flex-[2] py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black rounded-xl shadow-lg shadow-blue-200 hover:scale-[1.02] active:scale-95 transition-all uppercase tracking-widest text-[11px] flex items-center justify-center gap-2"
+              >
+                <FileText size={16} className="mr-1" /> 복사
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- 3D 공구경로 시뮬레이터 --- */}
+      {showSim && ncSim && (
+        <NcSimulator sim={ncSim} code={ncCode} onClose={() => setShowSim(false)} />
       )}
     </div>
   );
