@@ -102,11 +102,21 @@ export const NcSimulator = ({ sim, code, onClose }: { sim: any; code: string; on
     const zMin = sim.zMin, zMax = sim.zMax, zc = (zMin + zMax) / 2;
     const workLen = Math.max(zMax - zMin, 1) + Math.max(wW, 4) + 8;
 
+    const internal = !!sim.internal;
+    const bodyR = internal ? Math.max(r2 * 1.4, r2 + 8) : r1; // 내경: 보어보다 큰 부재 외형
     const root = new THREE.Group(); root.position.z = -zc; scene.add(root);
-    const stock = new THREE.Mesh(new THREE.CylinderGeometry(r1, r1, workLen, 48), new THREE.MeshPhongMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.22 }));
+    const stock = new THREE.Mesh(new THREE.CylinderGeometry(bodyR, bodyR, workLen, 48), new THREE.MeshPhongMaterial({ color: 0x94a3b8, transparent: true, opacity: internal ? 0.12 : 0.22 }));
     stock.rotation.x = Math.PI / 2; stock.position.z = zc; root.add(stock);
-    const fin = new THREE.Mesh(new THREE.CylinderGeometry(r2, r2, workLen + 0.2, 48), new THREE.MeshPhongMaterial({ color: 0x3b82f6 }));
-    fin.rotation.x = Math.PI / 2; fin.position.z = zc; root.add(fin);
+    if (internal) {
+      // 내경: 시작 보어(회색) + 목표 보어(파랑) 반투명 실린더로 표시
+      const startBore = new THREE.Mesh(new THREE.CylinderGeometry(r1, r1, workLen + 0.2, 48), new THREE.MeshPhongMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.3, side: THREE.DoubleSide }));
+      startBore.rotation.x = Math.PI / 2; startBore.position.z = zc; root.add(startBore);
+      const finBore = new THREE.Mesh(new THREE.CylinderGeometry(r2, r2, workLen + 0.4, 48), new THREE.MeshPhongMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
+      finBore.rotation.x = Math.PI / 2; finBore.position.z = zc; root.add(finBore);
+    } else {
+      const fin = new THREE.Mesh(new THREE.CylinderGeometry(r2, r2, workLen + 0.2, 48), new THREE.MeshPhongMaterial({ color: 0x3b82f6 }));
+      fin.rotation.x = Math.PI / 2; fin.position.z = zc; root.add(fin);
+    }
     root.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, zc - workLen / 2), new THREE.Vector3(0, 0, zc + workLen / 2)]), new THREE.LineBasicMaterial({ color: 0x475569 })));
     const bRad = (Number(sim.bAngle) || 0) * Math.PI / 180; // B=0 하향, -90 소재방향(-Z), +90 서브(+Z)
     const wheel = new THREE.Mesh(new THREE.CylinderGeometry(wR, wR, Math.max(wW, 2), 56), new THREE.MeshPhongMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.8 }));
@@ -116,7 +126,7 @@ export const NcSimulator = ({ sim, code, onClose }: { sim: any; code: string; on
     root.add(new THREE.Line(traceGeo, new THREE.LineBasicMaterial({ color: 0xef4444 })));
 
     const { P, segs } = model;
-    const S = Math.max(workLen, d1 * 1.5); // 소재 기준 프레이밍(휠 크기 무시)
+    const S = Math.max(workLen, (internal ? bodyR * 2 : d1) * 1.5); // 소재 기준 프레이밍(휠 크기 무시)
     camera.position.set(S * 0.6, S * 0.5, S * 0.95);
     controls.target.set(0, 0, 0); controls.update();
 
@@ -273,7 +283,7 @@ export const NcSimulator = ({ sim, code, onClose }: { sim: any; code: string; on
           </div>
           {/* 폭 상황 표기 (필터로 on/off) */}
           {showWidth && (
-            <div className="absolute top-3 left-3 bg-slate-900/85 border border-slate-700 rounded-lg px-3 py-2 text-[11px] text-slate-200 leading-relaxed pointer-events-none">
+            <div className="absolute top-3 right-3 max-h-[85%] overflow-y-auto bg-slate-900/85 border border-slate-700 rounded-lg px-3 py-2 text-[11px] text-slate-200 leading-relaxed shadow-lg">
               <div className="font-black text-amber-300 mb-1">휠/폭 상황</div>
               <div>휠 Ø: <span className="font-mono text-amber-200">{wheelOd || '-'}</span> × 폭 <span className="font-mono text-amber-200">{wheelW || '-'}</span> mm</div>
               <div>옵셋 기준: <span className="font-mono text-amber-200">{offsetLabel}</span></div>

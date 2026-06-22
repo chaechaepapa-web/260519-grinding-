@@ -25,6 +25,10 @@ const SETUP_TYPES = [
 const CYCLE_TYPES = [
   { id: 'od_plunge', label: '외경 연삭 (Plunge)', desc: 'Outer Diameter Plunge Cycle', icon: MoveDiagonal },
   { id: 'od_traverse', label: '외경 연삭 (Traverse)', desc: 'Outer Diameter Traverse Cycle', icon: ArrowLeftRight },
+  { id: 'id_plunge', label: '내경 연삭 (Plunge)', desc: 'Inner Diameter Plunge Cycle', icon: MoveDiagonal },
+  { id: 'id_traverse', label: '내경 연삭 (Traverse)', desc: 'Inner Diameter Traverse Cycle', icon: ArrowLeftRight },
+  { id: 'face_plunge', label: '단면 연삭 (Plunge)', desc: 'Face Plunge Cycle', icon: MoveDiagonal },
+  { id: 'face_traverse', label: '단면 연삭 (Traverse)', desc: 'Face Traverse Cycle', icon: ArrowLeftRight },
 ];
 
 const ALL_MENUS = [...SETUP_TYPES, ...CYCLE_TYPES];
@@ -39,7 +43,12 @@ const App = () => {
   
   // 라디오 그룹용 상태 변수들
   const [offsetMode, setOffsetMode] = useState('x_plus');
-  const [dressDirection, setDressDirection] = useState('horizontal'); 
+  // 사이클 종류에 맞춰 옵셋 기준 자동 설정: 외경=X+, 내경=X- (수동 변경 가능)
+  useEffect(() => {
+    if (selectedMenu === 'id_plunge' || selectedMenu === 'id_traverse') setOffsetMode('x_minus');
+    else if (selectedMenu === 'od_plunge' || selectedMenu === 'od_traverse') setOffsetMode('x_plus');
+  }, [selectedMenu]);
+  const [dressDirection, setDressDirection] = useState('horizontal');
   const [gapSensor, setGapSensor] = useState('off'); // 갭검출 기능 미개발 → 기본 OFF
   const [measureMode, setMeasureMode] = useState('in_process'); 
 
@@ -372,6 +381,54 @@ const App = () => {
       { id: 'spark_rub_feed', stage: 'spark', label: '스파크 비비기 이송 (번개모드)', unit: 'mm/min', value: '200', desc: '번개모드 비비기 왕복 이송 속도.' }
     ];
 
+    // --- 내경 연삭 (플런지) : OD와 동일 구조, d2(목표내경) > d1(시작내경), 절입 X+ ---
+    const idPlungeGeometryFields = [
+      { id: 'd1', label: '시작 내경 (Start Bore Dia.)', unit: 'mm', value: '48.000', desc: '가공 전 보어(구멍)의 초기 내경' },
+      { id: 'd2', label: '목표 내경 (Finish Bore Dia.)', unit: 'mm', value: '50.000', desc: '가공 완료 후 최종 목표 내경 (시작보다 커야 함)' },
+      { id: 'z_start', label: '가공 시작 위치 (Start Pos.)', unit: 'mm', value: '100.000', desc: '플런지 선단이 처음 닿는 Z축 지점' },
+      { id: 'width', label: '가공 길이 (Grind Length, 부호=방향)', unit: 'mm', value: '-25.000', desc: '시작 위치에서 보어 안쪽으로의 가공 길이. 음수=Z−, 양수=Z+. 길이는 절대값으로 계산.' },
+      { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '2.000', desc: '가공 전 휠이 보어 안쪽에서 접근할 때의 도피량(소재보다 안쪽).' }
+    ];
+
+    // --- 내경 연삭 (트래버스) : OD와 동일 구조, d2 > d1, 절입 X+ ---
+    const idTraverseGeometryFields = [
+      { id: 'd1', label: '시작 내경 (Start Bore Dia.)', unit: 'mm', value: '48.000', desc: '가공 전 보어의 초기 내경' },
+      { id: 'd2', label: '목표 내경 (Finish Bore Dia.)', unit: 'mm', value: '50.000', desc: '가공 완료 후 최종 목표 내경 (시작보다 커야 함)' },
+      { id: 'z_start', label: '가공 시작 위치 (Start Pos.)', unit: 'mm', value: '100.000', desc: '왕복(Traverse) 운동이 시작되는 Z축 지점' },
+      { id: 'z_end', label: '가공 종료 위치 (End Pos.)', unit: 'mm', value: '50.000', desc: '왕복(Traverse) 운동이 끝나는 Z축 지점' },
+      { id: 'zigzag_angle', label: '지그재그(번개) 모드 ON (>0)', unit: 'deg', value: '0.000', desc: '0=직선 트래버스. >0=번개모드 ON. 번개에서는 한 레그가 전체 Z를 사선으로 트래버스하며 X+로 절입.' },
+      { id: 'zigzag_infeed', label: '번개 X 1회 절입량 (직경)', unit: 'mm', value: '0.020', desc: '[번개모드 전용] 한 레그(전체 Z 사선 트래버스)마다 X+로 절입하는 직경량. Z 이동 중 절입.' },
+      { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '2.000', desc: '가공 전 휠이 보어 안쪽에서 접근할 때의 도피량.' },
+      { id: 'over_start', label: '트래버스 오버런 (Start)', unit: 'mm', value: '15.000', desc: '시작 위치를 벗어나 휠이 더 나가는 거리' },
+      { id: 'over_end', label: '트래버스 오버런 (End)', unit: 'mm', value: '15.000', desc: '종료 위치를 벗어나 휠이 더 나가는 거리' },
+      { id: 'infeed_start', label: '시작단 절입량 (Infeed Start)', unit: 'mm', value: '0.005', desc: '[직선 트래버스 전용] 시작 위치에서 방향을 바꿀 때 1회 X+ 절입량. (번개모드 미사용)' },
+      { id: 'infeed_end', label: '종료단 절입량 (Infeed End)', unit: 'mm', value: '0.000', desc: '[직선 트래버스 전용] 종료 위치에서 방향을 바꿀 때 1회 X+ 절입량. (번개모드 미사용)' }
+    ];
+
+    // --- 단면 연삭 (플런지) : Z절입(단면 위치) + 반경(X) 범위 ---
+    const facePlungeGeometryFields = [
+      { id: 'zf_start', label: '시작 단면 위치 (Start Face Z)', unit: 'mm', value: '100.000', desc: '가공 전 단면의 Z 위치(휠이 처음 닿는 면).' },
+      { id: 'zf_target', label: '목표 단면 위치 (Finish Face Z)', unit: 'mm', value: '98.000', desc: '가공 완료 후 단면 Z 위치. 시작보다 작으면 −Z로 깎음. 제거량=|시작−목표|.' },
+      { id: 'd_outer', label: '단면 외경 (Face Outer Dia.)', unit: 'mm', value: '50.000', desc: '단면 가공 범위의 바깥 직경.' },
+      { id: 'd_inner', label: '단면 내경 (Face Inner Dia.)', unit: 'mm', value: '0.000', desc: '단면 가공 범위의 안쪽 직경. 0=중실(센터까지).' },
+      { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '2.000', desc: '가공 전 휠이 단면 바깥(Z)에서 접근할 때의 도피량.' }
+    ];
+
+    // --- 단면 연삭 (트래버스) : Z절입 + 반경(X) 왕복 ---
+    const faceTraverseGeometryFields = [
+      { id: 'zf_start', label: '시작 단면 위치 (Start Face Z)', unit: 'mm', value: '100.000', desc: '가공 전 단면의 Z 위치.' },
+      { id: 'zf_target', label: '목표 단면 위치 (Finish Face Z)', unit: 'mm', value: '98.000', desc: '가공 완료 후 단면 Z 위치. 제거량=|시작−목표|.' },
+      { id: 'd_outer', label: '단면 외경 (Face Outer Dia.)', unit: 'mm', value: '50.000', desc: '반경 왕복 바깥 직경.' },
+      { id: 'd_inner', label: '단면 내경 (Face Inner Dia.)', unit: 'mm', value: '0.000', desc: '반경 왕복 안쪽 직경. 0=중실(센터까지).' },
+      { id: 'zigzag_angle', label: '지그재그(번개) 모드 ON (>0)', unit: 'deg', value: '0.000', desc: '0=직선 트래버스. >0=번개모드 ON. 한 레그가 전체 반경(X)을 사선으로 트래버스하며 Z로 절입.' },
+      { id: 'zigzag_infeed', label: '번개 Z 1회 절입량', unit: 'mm', value: '0.020', desc: '[번개모드 전용] 한 레그(전체 반경 사선)마다 Z로 절입하는 양. X 이동 중 절입.' },
+      { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '2.000', desc: '가공 전 휠이 단면 바깥(Z)에서 접근할 때의 도피량.' },
+      { id: 'over_outer', label: '반경 오버런 (외경측)', unit: 'mm', value: '5.000', desc: '외경을 벗어나 휠이 더 나가는 직경량.' },
+      { id: 'over_inner', label: '반경 오버런 (내경측)', unit: 'mm', value: '2.000', desc: '내경을 벗어나 안쪽으로 더 들어가는 직경량(센터 0 클램프).' },
+      { id: 'infeed_o', label: '외경단 Z절입량 (Infeed Outer)', unit: 'mm', value: '0.005', desc: '[직선 전용] 외경단에서 방향 전환 시 1회 Z절입량. (번개모드 미사용)' },
+      { id: 'infeed_i', label: '내경단 Z절입량 (Infeed Inner)', unit: 'mm', value: '0.000', desc: '[직선 전용] 내경단에서 방향 전환 시 1회 Z절입량. (번개모드 미사용)' }
+    ];
+
 
     const isSetupMode = (currentMenuInfo as any)?.isSetup;
     const isDressingMode = (currentMenuInfo as any)?.isDress;
@@ -392,11 +449,19 @@ const App = () => {
       if (activeTab === 'geometry') {
         if (selectedMenu === 'od_plunge') return odPlungeGeometryFields;
         if (selectedMenu === 'od_traverse') return odTraverseGeometryFields;
+        if (selectedMenu === 'id_plunge') return idPlungeGeometryFields;
+        if (selectedMenu === 'id_traverse') return idTraverseGeometryFields;
+        if (selectedMenu === 'face_plunge') return facePlungeGeometryFields;
+        if (selectedMenu === 'face_traverse') return faceTraverseGeometryFields;
         return [];
       }
       if (activeTab === 'cutting') {
         if (selectedMenu === 'od_plunge') return odPlungeCuttingFields;
         if (selectedMenu === 'od_traverse') return odTraverseCuttingFields;
+        if (selectedMenu === 'id_plunge') return odPlungeCuttingFields;
+        if (selectedMenu === 'id_traverse') return odTraverseCuttingFields;
+        if (selectedMenu === 'face_plunge') return odPlungeCuttingFields;
+        if (selectedMenu === 'face_traverse') return odTraverseCuttingFields;
         return [];
       }
       return [];
@@ -541,28 +606,28 @@ const App = () => {
       // 선단(제어점) 기준으로 스윕 → 휠 몸체(폭 wW)가 [zs..ze] 전체 + 오버런을 커버. (플런지와 동일한 선단 모델)
       if (activeStages.spark) {
         const oscN = Math.round(N(cut.spark_osc_n) || 0), oscF = cut.spark_osc_feed, over = Math.max(N(cut.spark_osc_overrun) || 0, 0);
+        const groundEnd = zs + dir * cum;     // 실제 가공된 마지막 선단(툴패스 누적 길이)
         const leadA = zs + dir * (wW - over); // 시작측 선단(몸체가 zs까지 덮음; over면 더 지나침)
-        const leadB = ze + dir * over;        // 끝측 선단(가공 끝 + 오버런)
-        const sweep = dir * (leadB - leadA);  // 양수면 유효 스윕(휠이 가공부보다 좁음)
+        const leadB = groundEnd + dir * over; // 실가공 끝 선단 + 오버런 (미가공부 침범 방지)
+        const sweep = dir * (leadB - leadA);  // 양수면 유효 스윕(가공부가 휠폭보다 김)
         if (oscN > 0 && sweep > 1e-6) {
           L.push(`(=== SPARK OUT : FULL-ZONE OSCILLATION x${oscN} (전구간 왕복, 오버런 ${over.toFixed(3)}) ===)`);
           L.push(`G0 X${xc(xApproach)} Z${f3(leadA)}`); moves.push({ x: xApproach, z: leadA, rapid: true, line: L.length - 1 });
-          L.push(`G1 X${xc(d2)} F${oscF}`); moves.push({ x: d2, z: leadA, rapid: false, line: L.length - 1 });
+          L.push(`G1 X${xc(cur)} F${oscF}`); moves.push({ x: cur, z: leadA, rapid: false, line: L.length - 1 });
           for (let k = 0; k < oscN; k++) {
-            L.push(`G1 Z${f3(leadB)} F${oscF}`); moves.push({ x: d2, z: leadB, rapid: false, line: L.length - 1 });
-            L.push(`G1 Z${f3(leadA)} F${oscF}`); moves.push({ x: d2, z: leadA, rapid: false, line: L.length - 1 });
+            L.push(`G1 Z${f3(leadB)} F${oscF}`); moves.push({ x: cur, z: leadB, rapid: false, line: L.length - 1 });
+            L.push(`G1 Z${f3(leadA)} F${oscF}`); moves.push({ x: cur, z: leadA, rapid: false, line: L.length - 1 });
           }
           L.push(`G0 X${xc(xApproach)}`); moves.push({ x: xApproach, z: leadA, rapid: true, line: L.length - 1 });
           L.push(`G0 Z${f3(zSafe)}`); moves.push({ x: xApproach, z: zSafe, rapid: true, line: L.length - 1 });
         }
       }
 
-      L.push(`G0 X${xc(xRetract)}`);
-      moves.push({ x: xRetract, z: parseFloat(zc), rapid: true, line: L.length - 1 });
+      // 마지막 플런지에서 이미 X도피→Z안전회피 완료. 추가 X이동 없이 바로 원점복귀.
       L.push('M5 P12');
       L.push('M5 P11');
       L.push('M9');
-      L.push('G28 U0 W0');
+      L.push('G28 U0 W0 (Z안전회피 위치에서 바로 원점복귀)');
       L.push('M30');
       L.push('%');
       const sim = {
@@ -647,7 +712,8 @@ const App = () => {
         if (zigOn) {
           // 번개(지그재그) 트래버스 — 한 레그 = 전체 Z를 사선으로 트래버스하며 X-로 1회 절입(절입량).
           //  · Z 이동(전체 스팬) 중에 절입이 일어남(=사선 1줄)  · 레그마다 Z 방향 교대 → X-로 내려가는 번개.
-          const infD = Math.max(N(geo.zigzag_infeed) || 0, 0); // X 1회 절입량(직경, 레그당)
+          let infD = Math.max(N(geo.zigzag_infeed) || 0, 0); // X 1회 절입량(직경, 레그당)
+          if (infD <= 1e-9) infD = N(geo.infeed_start) > 1e-9 ? N(geo.infeed_start) : 0.01; // 미설정 폴백(1레그 붕괴 방지)
           L.push(`G1 X${f3(curDia)} F${fr}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 }); // 시작단 표면 접촉
           let atStart = true, guard = 0;
           while (curDia > target + 1e-6 && guard < 100000) {
@@ -768,6 +834,595 @@ const App = () => {
       return { code: L.join('\n'), sim };
     };
 
+    // =========================================================
+    // ID(내경) 플런지 — OD 플런지와 동일 매커니즘, 절입 방향만 X+ (내경 확대: d2 > d1)
+    // =========================================================
+    const generateIDPlunge = () => {
+      const geo = toMap(idPlungeGeometryFields);
+      const cut = toMap(odPlungeCuttingFields); // 가공조건 필드는 OD와 동일 (값은 id_plunge 키로 별도 저장)
+      const wheel = toMapAt('tool_setup', wheelSetupFields);
+      const N = (v: any) => parseFloat(v);
+      const f3 = (v: number) => v.toFixed(3);
+
+      const d1 = N(geo.d1), d2 = N(geo.d2);  // d1=시작 내경(작음), d2=목표 내경(큼)
+      const zs = N(geo.z_start);
+      const clr = N(geo.clearance);
+      const gwIn = N(geo.width);
+      const gw = Math.abs(gwIn);
+      const dir = gwIn < 0 ? -1 : 1;
+      const ze = zs + dir * gw;
+      const zSafe = zs - dir * clr;
+      const workRpm = N(cut.work_rpm), vc = N(cut.wheel_vc);
+      const wheelOd = N(wheel.wheel_od);
+      const wheelW = N(wheel.wheel_width);
+      const tCode = wheel.t_code || '0101';
+      const bAng = parseFloat(bAngle);
+      const gCode = paramValues['work_coord:g_code'] ?? '54';
+
+      const warn: string[] = [];
+      if (!(d2 > d1)) warn.push('목표 내경(d2)이 시작 내경(d1)보다 커야 합니다 - ID는 내경 확대가공.');
+      const total = d2 - d1;
+      const roughOffset = activeStages.rough ? N(cut.rough_offset) : 0;
+      if (activeStages.rough && roughOffset >= total) warn.push(`황삭 옵셋(${roughOffset})이 총제거량(${total.toFixed(3)}) 이상 → 황삭이 목표에 못 미침.`);
+      if (!(workRpm > 0)) warn.push('워크 회전수가 0 이하입니다.');
+      if (!(wheelOd > 0)) warn.push('휠 외경이 0 이하입니다.');
+      if (wheelOd >= d1) warn.push(`휠 외경(${wheelOd})이 시작 내경(${d1}) 이상 → 보어에 휠이 들어가지 않습니다.`);
+      if (offsetMode !== 'x_minus') warn.push(`ID는 공구 옵셋 기준이 내경(X-)이어야 합니다. (현재: ${offsetMode})`);
+      if (!(wheelW > 0)) warn.push('휠 폭이 입력되지 않았습니다 (공구설정에서 입력).');
+      const passWv = plungePaths.length > 0 ? plungePaths.map(Number) : [Math.min(wheelW > 0 ? wheelW : gw, gw)];
+      const sumWv = passWv.reduce((a, b) => a + (Number(b) || 0), 0);
+      if (gw - sumWv > 0.001) warn.push(`남은 가공길이 ${(gw - sumWv).toFixed(3)}mm → 툴패스 추가/길이 조정 필요.`);
+      passWv.forEach((w, i) => { if (Number(w) > wheelW + 1e-6) warn.push(`툴패스 ${i + 1} 폭(${w}) > 휠폭(${wheelW}) → 1회 플런지 불가.`); });
+
+      const sw = wheelOd > 0 ? Math.round((vc * 60000) / (Math.PI * wheelOd)) : 0;
+      const zc = f3((zs + ze) / 2);
+      // 옵셋 보정(직경, 내경 기준): x-(보어 접촉) =0 / center(휠 중심) =−휠반경 / x+(반대편) =−휠경.
+      //  내경은 휠이 보어 안쪽이라 외경과 부호 반대. 예) 보어Ø50 접촉 → x-:X50, center:X35, x+:X20 (휠Ø30)
+      const xOff = offsetMode === 'center' ? -wheelOd / 2 : offsetMode === 'x_plus' ? -wheelOd : 0;
+      const xc = (d: number) => f3(d + xOff);
+      const xApproach = d1 - 2 * clr;        // 접근 에어갭(보어 안쪽, 접촉 직경 기준)
+      const xRetract = d1 - 2 * clr - 1;     // 안전 후퇴경(보어 안쪽으로 더)
+
+      // 단계: 황삭=목표경−황삭옵셋(목표 아래로 남김), 정삭=목표경. d1→d2 단조증가.
+      const seqRaw: { lbl: string; t: number; f: any }[] = [];
+      if (activeStages.rough) seqRaw.push({ lbl: 'ROUGH', t: d2 - roughOffset, f: cut.rough_fr });
+      if (activeStages.finish) seqRaw.push({ lbl: 'FINISH', t: d2, f: cut.finish_fr });
+      if (seqRaw.length) seqRaw[seqRaw.length - 1].t = d2;
+      let prevT = d1;
+      for (const s of seqRaw) { s.t = Math.max(Math.min(s.t, d2), prevT); prevT = s.t; } // 단조증가 + d2 클램프
+      const seq = seqRaw.map(s => ({ lbl: s.lbl, t: s.t, f: s.f }));
+      let cur = seqRaw.length ? seqRaw[seqRaw.length - 1].t : d1;
+
+      const L: string[] = [];
+      const moves: any[] = [];
+      L.push('%');
+      L.push(`O0012 (ID PLUNGE GRIND / ${selectedProject.name})`);
+      L.push('(WORK:P11-C1  WHEEL:P12  X=DIA  FEED:G98  INTERNAL)');
+      L.push(`(OFFSET:${offsetMode}  X-COMP=${xOff >= 0 ? '+' : ''}${xOff.toFixed(3)} DIA  [x-:0 / center:-R / x+:-D]  ***기계검증***)`);
+      warn.forEach(w => L.push(`(***확인필요*** ${w})`));
+      L.push(`G0 G98 G80 G40 G${gCode}`);
+      L.push('G18');
+      L.push('G28 U0 W0');
+      L.push(`T${tCode}`);
+      L.push(`G400 B${bAng} J1 (***확인필요*** J=인선방향, 내경 휠 등록값 확인)`);
+      L.push('(***확인필요*** 워크회전 P11 + 휠회전 P12 동시운용 - 실제 내경연삭 NC 확인)');
+      L.push('M8');
+      L.push(`G97 M3 S${sw} P12 (WHEEL Vc${vc}M/S @OD${wheelOd}=${sw}RPM)`);
+      L.push(`G97 M3 S${workRpm} P11 (WORK ${workRpm}RPM)`);
+      const doPlungeAt = (zPos: string) => {
+        const zN = parseFloat(zPos);
+        L.push(`G0 X${xc(xApproach)} Z${f3(zSafe)}`);
+        moves.push({ x: xApproach, z: zSafe, rapid: true, line: L.length - 1 });
+        L.push(`G0 Z${zPos}`);
+        moves.push({ x: xApproach, z: zN, rapid: true, line: L.length - 1 });
+        seq.forEach(s => { L.push(`(--- ${s.lbl} ---)`); L.push(`G1 X${xc(s.t)} F${s.f}`); moves.push({ x: s.t, z: zN, rapid: false, line: L.length - 1 }); });
+        if (activeStages.spark) {
+          const dw = N(cut.spark_out);
+          if (dw > 0) { L.push('(--- SPARK OUT : DWELL ---)'); L.push(`G4 X${dw.toFixed(1)} (휴지 ${cut.spark_out}s)`); moves.push({ x: cur, z: zN, dwell: dw, rapid: false, line: L.length - 1 }); }
+        }
+        L.push(`G0 X${xc(xApproach)}`); // X 도피(보어 안쪽으로)
+        moves.push({ x: xApproach, z: zN, rapid: true, line: L.length - 1 });
+        L.push(`G0 Z${f3(zSafe)}`);
+        moves.push({ x: xApproach, z: zSafe, rapid: true, line: L.length - 1 });
+      };
+
+      moves.push({ x: xRetract, z: parseFloat(zc), rapid: true, line: L.length - 1 });
+
+      const wW = wheelW > 0 ? wheelW : gw;
+      const passW = plungePaths.length > 0 ? plungePaths.map(Number) : [Math.min(wW, gw)];
+      let cum = 0;
+      for (let i = 0; i < passW.length && cum < gw - 1e-6; i++) {
+        const cover = Math.min(Math.max(passW[i] || 0, 0), wW, gw - cum);
+        if (cover <= 1e-6) continue;
+        const leadZ = zs + dir * (cum + cover);
+        L.push(`(TOOLPATH ${i + 1}/${passW.length} 선단@Z${f3(leadZ)} 폭 ${cover.toFixed(3)})`);
+        doPlungeAt(f3(leadZ));
+        cum += cover;
+      }
+
+      if (activeStages.spark) {
+        const oscN = Math.round(N(cut.spark_osc_n) || 0), oscF = cut.spark_osc_feed, over = Math.max(N(cut.spark_osc_overrun) || 0, 0);
+        const groundEnd = zs + dir * cum;     // 실제 가공된 마지막 선단(툴패스 누적 길이)
+        const leadA = zs + dir * (wW - over);
+        const leadB = groundEnd + dir * over; // 실가공 끝 선단 + 오버런 (미가공부 침범 방지)
+        const sweep = dir * (leadB - leadA);
+        if (oscN > 0 && sweep > 1e-6) {
+          L.push(`(=== SPARK OUT : FULL-ZONE OSCILLATION x${oscN} (전구간 왕복, 오버런 ${over.toFixed(3)}) ===)`);
+          L.push(`G0 X${xc(xApproach)} Z${f3(leadA)}`); moves.push({ x: xApproach, z: leadA, rapid: true, line: L.length - 1 });
+          L.push(`G1 X${xc(cur)} F${oscF}`); moves.push({ x: cur, z: leadA, rapid: false, line: L.length - 1 });
+          for (let k = 0; k < oscN; k++) {
+            L.push(`G1 Z${f3(leadB)} F${oscF}`); moves.push({ x: cur, z: leadB, rapid: false, line: L.length - 1 });
+            L.push(`G1 Z${f3(leadA)} F${oscF}`); moves.push({ x: cur, z: leadA, rapid: false, line: L.length - 1 });
+          }
+          L.push(`G0 X${xc(xApproach)}`); moves.push({ x: xApproach, z: leadA, rapid: true, line: L.length - 1 });
+          L.push(`G0 Z${f3(zSafe)}`); moves.push({ x: xApproach, z: zSafe, rapid: true, line: L.length - 1 });
+        }
+      }
+
+      // 마지막 플런지에서 이미 X도피→Z안전회피 완료. 추가 X이동 없이 바로 원점복귀.
+      L.push('M5 P12'); L.push('M5 P11'); L.push('M9'); L.push('G28 U0 W0 (Z안전회피 위치에서 바로 원점복귀)'); L.push('M30'); L.push('%');
+      const sim = {
+        moves, wheelOd, wheelW: wheelW > 0 ? wheelW : Math.max(gw, 5), wheelWReal: wheelW,
+        d1, d2, zMin: Math.min(zs, zs + dir * gw), zMax: Math.max(zs, zs + dir * gw), grindWidth: gw, offset: offsetMode, bAngle: bAng, bodyDir: dir, internal: true,
+      };
+      return { code: L.join('\n'), sim };
+    };
+
+    // =========================================================
+    // ID(내경) 트래버스 — OD 트래버스와 동일 매커니즘, 절입 방향만 X+ (d2 > d1)
+    // =========================================================
+    const generateIDTraverse = () => {
+      const geo = toMap(idTraverseGeometryFields);
+      const cut = toMap(odTraverseCuttingFields);
+      const wheel = toMapAt('tool_setup', wheelSetupFields);
+      const N = (v: any) => parseFloat(v);
+      const f3 = (v: number) => v.toFixed(3);
+
+      const d1 = N(geo.d1), d2 = N(geo.d2);  // d1=시작 내경(작음), d2=목표 내경(큼)
+      const zs = N(geo.z_start), ze = N(geo.z_end);
+      const clr = N(geo.clearance);
+      const ovS = N(geo.over_start), ovE = N(geo.over_end);
+      const inS = N(geo.infeed_start), inE = N(geo.infeed_end);
+      const zig = N(geo.zigzag_angle) || 0;
+      const zigOn = Math.abs(zig) > 1e-6;
+      const workRpm = N(cut.work_rpm), vc = N(cut.wheel_vc);
+      const wheelOd = N(wheel.wheel_od);
+      const tCode = wheel.t_code || '0101';
+      const bAng = parseFloat(bAngle);
+      const gCode = paramValues['work_coord:g_code'] ?? '54';
+      const sw = wheelOd > 0 ? Math.round((vc * 60000) / (Math.PI * wheelOd)) : 0;
+
+      const sgn = (zs >= ze) ? 1 : -1;
+      const zStartLim = zs + sgn * ovS;
+      const zEndLim = ze - sgn * ovE;
+      const span = zEndLim - zStartLim;
+      const sgnExpr = (v: number) => (v >= 0 ? `+${f3(v)}` : `-${f3(-v)}`);
+      const useMacro = travUseMacro && !zigOn;
+      const xApproach = f3(d1 - 0.4);        // 보어 안쪽 접근
+      const xRetract = f3(d1 - 2 * clr);     // 보어 안쪽 후퇴
+
+      const warn: string[] = [];
+      if (!(d2 > d1)) warn.push('목표 내경(d2)이 시작 내경(d1)보다 커야 합니다 - ID 확대가공.');
+      const total = d2 - d1;
+      const roughOffset = activeStages.rough ? N(cut.rough_offset) : 0;
+      if (activeStages.rough && roughOffset >= total) warn.push(`황삭 옵셋(${roughOffset})이 총제거량(${total.toFixed(3)}) 이상 → 황삭이 목표에 못 미침.`);
+      if (wheelOd >= d1) warn.push(`휠 외경(${wheelOd})이 시작 내경(${d1}) 이상 → 보어에 휠이 들어가지 않습니다.`);
+      const noInfeed = (inS + inE) <= 0;
+      if (noInfeed) warn.push('시작단/종료단 절입이 모두 0 → 단계당 1패스로 처리.');
+      if (offsetMode !== 'x_minus') warn.push(`ID는 옵셋 기준이 내경(X-)이어야 합니다. (현재: ${offsetMode})`);
+      if (zigOn) {
+        const infZ = N(geo.zigzag_infeed) || 0;
+        warn.push(`번개(지그재그) 모드 ON: 한 레그=전체 Z 사선 트래버스(W±${Math.abs(span).toFixed(1)}) 중 X+로 ${infZ}/레그 절입. U/W 상대좌표, 매크로 미적용.`);
+        if (infZ <= 0) warn.push('번개 X 1회 절입량이 0 → 단계당 1패스 사선으로 처리됩니다. 값 입력 권장.');
+      }
+      // 옵셋 보정(내경 기준): x-(보어 접촉)=0 / center=−휠반경 / x+=−휠경 (외경과 부호 반대)
+      const xOff = offsetMode === 'center' ? -wheelOd / 2 : offsetMode === 'x_plus' ? -wheelOd : 0;
+      const xc = (d: number) => f3(d + xOff);
+
+      const L: string[] = [];
+      const moves: any[] = [];
+      L.push('%');
+      L.push(`O0013 (ID TRAVERSE GRIND / ${selectedProject.name})`);
+      L.push(`(WORK:P11-C1  WHEEL:P12  X=DIA  FEED:G98  INTERNAL  ${useMacro ? 'MACRO-B' : zigOn ? 'ZIGZAG U/W' : 'EXPANDED'})`);
+      L.push(`(OFFSET:${offsetMode}  X-COMP=${xOff >= 0 ? '+' : ''}${xOff.toFixed(3)} DIA  [x-:0 / center:-R / x+:-D]  ***기계검증***)`);
+      warn.forEach(w => L.push(`(***확인필요*** ${w})`));
+      if (useMacro) L.push('(***확인필요*** 커스텀매크로B(#변수/WHILE/IF) 지원 - 실제 SMX 확인)');
+      L.push(`G0 G98 G80 G40 G${gCode}`);
+      L.push('G18');
+      L.push('G28 U0 W0');
+      L.push(`T${tCode}`);
+      L.push(`G400 B${bAng} J1 (***확인필요*** J=인선방향)`);
+      L.push('(***확인필요*** 워크회전 P11 + 휠회전 P12 동시운용)');
+      L.push('M8');
+      L.push(`G97 M3 S${sw} P12 (WHEEL Vc${vc}M/S @OD${wheelOd}=${sw}RPM)`);
+      L.push(`G97 M3 S${workRpm} P11 (WORK ${workRpm}RPM)`);
+      if (useMacro) L.push(`#100 = ${f3(d1)} (CURRENT DIA)`);
+      L.push(`G0 X${xc(parseFloat(xApproach))} Z${f3(zStartLim)}`);
+      moves.push({ x: parseFloat(xRetract), z: zStartLim, rapid: true, line: L.length - 1 });
+      moves.push({ x: parseFloat(xApproach), z: zStartLim, rapid: true, line: L.length - 1 });
+
+      let curDia = d1;
+      const emitStage = (lbl: string, target: number, fr: any) => {
+        if (target <= curDia + 1e-6) return; // ID: target가 더 커야 진행
+        L.push(`(--- ${lbl} TRAVERSE -> DIA ${f3(target)}${zigOn ? ' (ZIGZAG U/W, X+ 진행)' : ''} ---)`);
+        if (zigOn) {
+          let infD = Math.max(N(geo.zigzag_infeed) || 0, 0);
+          if (infD <= 1e-9) infD = N(geo.infeed_start) > 1e-9 ? N(geo.infeed_start) : 0.01; // 미설정 폴백(1레그 붕괴 방지)
+          L.push(`G1 X${xc(curDia)} F${fr}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+          let atStart = true, guard = 0;
+          while (curDia < target - 1e-6 && guard < 100000) {
+            guard++;
+            const dropD = Math.min(infD > 1e-9 ? infD : (target - curDia), target - curDia); // X+ 절입(직경)
+            const w = atStart ? span : -span;
+            curDia += dropD;
+            L.push(`G1 U${sgnExpr(dropD)} W${sgnExpr(w)} F${fr}`); // 사선: Z 이동하며 X+ 절입
+            moves.push({ x: curDia, z: atStart ? zEndLim : zStartLim, rapid: false, line: L.length - 1 });
+            atStart = !atStart;
+          }
+          L.push(`(--- LEVEL @DIA ${f3(target)} ---)`);
+          if (!atStart) { L.push(`G1 W${sgnExpr(-span)} F${fr}`); moves.push({ x: target, z: zStartLim, rapid: false, line: L.length - 1 }); }
+          else { L.push(`G1 W${sgnExpr(span)} F${fr}`); moves.push({ x: target, z: zEndLim, rapid: false, line: L.length - 1 }); L.push(`G1 W${sgnExpr(-span)} F${fr}`); moves.push({ x: target, z: zStartLim, rapid: false, line: L.length - 1 }); }
+          curDia = target;
+          return;
+        }
+        if (noInfeed) {
+          L.push(`G1 X${xc(target)} F${fr}`); curDia = target; moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+          L.push(`G1 Z${f3(zEndLim)} F${fr}`); moves.push({ x: target, z: zEndLim, rapid: false, line: L.length - 1 });
+          L.push(`G1 Z${f3(zStartLim)} F${fr}`); moves.push({ x: target, z: zStartLim, rapid: false, line: L.length - 1 });
+          return;
+        }
+        if (useMacro) {
+          L.push(`#101 = ${f3(target)}`);
+          L.push(`WHILE [#100 LT #101] DO1`);
+          L.push(`  #100 = #100 + ${f3(inS)}`);
+          L.push(`  IF [#100 GT #101] THEN #100 = #101`);
+          L.push(`  G1 X#100 F${fr}`); const lnInS = L.length - 1;
+          L.push(`  G1 Z${f3(zEndLim)} F${fr}`); const lnTE = L.length - 1;
+          L.push(`  #100 = #100 + ${f3(inE)}`);
+          L.push(`  IF [#100 GT #101] THEN #100 = #101`);
+          L.push(`  G1 X#100 F${fr}`); const lnInE = L.length - 1;
+          L.push(`  G1 Z${f3(zStartLim)} F${fr}`); const lnTS = L.length - 1;
+          L.push(`END1`);
+          let guard = 0;
+          while (curDia < target - 1e-6 && guard < 100000) {
+            guard++;
+            curDia = Math.min(curDia + inS, target);
+            moves.push({ x: curDia, z: zStartLim, rapid: false, line: lnInS });
+            moves.push({ x: curDia, z: zEndLim, rapid: false, line: lnTE });
+            curDia = Math.min(curDia + inE, target);
+            moves.push({ x: curDia, z: zEndLim, rapid: false, line: lnInE });
+            moves.push({ x: curDia, z: zStartLim, rapid: false, line: lnTS });
+          }
+        } else {
+          let guard = 0;
+          while (curDia < target - 1e-6 && guard < 100000) {
+            guard++;
+            curDia = Math.min(curDia + inS, target);
+            L.push(`G1 X${xc(curDia)} F${fr}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+            L.push(`G1 Z${f3(zEndLim)} F${fr}`); moves.push({ x: curDia, z: zEndLim, rapid: false, line: L.length - 1 });
+            curDia = Math.min(curDia + inE, target);
+            L.push(`G1 X${xc(curDia)} F${fr}`); moves.push({ x: curDia, z: zEndLim, rapid: false, line: L.length - 1 });
+            L.push(`G1 Z${f3(zStartLim)} F${fr}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+          }
+        }
+      };
+
+      const tgts: { lbl: string; t: number; f: any }[] = [];
+      if (activeStages.rough) tgts.push({ lbl: 'ROUGH', t: d2 - roughOffset, f: cut.rough_fr });
+      if (activeStages.finish) tgts.push({ lbl: 'FINISH', t: d2, f: cut.finish_fr });
+      if (tgts.length) tgts[tgts.length - 1].t = d2;
+      let prevT = d1;
+      for (const s of tgts) { s.t = Math.max(Math.min(s.t, d2), prevT); prevT = s.t; } // 단조증가 + d2 클램프
+      tgts.forEach(s => emitStage(s.lbl, s.t, s.f));
+
+      const spk = Math.round(N(cut.spark_out) || 0);
+      const spF = cut.finish_fr || cut.rough_fr;
+      if (activeStages.spark && spk > 0) {
+        L.push(`(--- SPARK OUT TRAVERSE x${spk}${zigOn ? ' (목표경 직선)' : ''} ---)`);
+        if (zigOn) {
+          for (let k = 0; k < spk; k++) {
+            L.push(`G1 W${sgnExpr(span)} F${spF}`); moves.push({ x: curDia, z: zEndLim, rapid: false, line: L.length - 1 });
+            L.push(`G1 W${sgnExpr(-span)} F${spF}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+          }
+        } else if (useMacro) {
+          L.push(`#102 = 0`);
+          L.push(`WHILE [#102 LT ${spk}] DO2`);
+          L.push(`  G1 Z${f3(zEndLim)} F${spF}`); const lse = L.length - 1;
+          L.push(`  G1 Z${f3(zStartLim)} F${spF}`); const lss = L.length - 1;
+          L.push(`  #102 = #102 + 1`);
+          L.push(`END2`);
+          for (let k = 0; k < spk; k++) { moves.push({ x: curDia, z: zEndLim, rapid: false, line: lse }); moves.push({ x: curDia, z: zStartLim, rapid: false, line: lss }); }
+        } else {
+          for (let k = 0; k < spk; k++) {
+            L.push(`G1 Z${f3(zEndLim)} F${spF}`); moves.push({ x: curDia, z: zEndLim, rapid: false, line: L.length - 1 });
+            L.push(`G1 Z${f3(zStartLim)} F${spF}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+          }
+        }
+      }
+      if (activeStages.spark && zigOn) {
+        const dw = N(cut.spark_dwell) || 0;
+        const rubN = Math.round(N(cut.spark_rub_n) || 0);
+        const rubF = cut.spark_rub_feed || spF;
+        if (dw > 0) { L.push(`(--- SPARK DWELL ${dw}s ---)`); L.push(`G4 X${dw.toFixed(1)}`); moves.push({ x: curDia, z: zStartLim, dwell: dw, rapid: false, line: L.length - 1 }); }
+        if (rubN > 0) {
+          L.push(`(--- SPARK RUB 전구간 비비기 x${rubN} ---)`);
+          for (let k = 0; k < rubN; k++) {
+            L.push(`G1 Z${f3(zEndLim)} F${rubF}`); moves.push({ x: curDia, z: zEndLim, rapid: false, line: L.length - 1 });
+            L.push(`G1 Z${f3(zStartLim)} F${rubF}`); moves.push({ x: curDia, z: zStartLim, rapid: false, line: L.length - 1 });
+          }
+        }
+      }
+
+      L.push(`G0 X${xc(parseFloat(xRetract))}`);
+      moves.push({ x: parseFloat(xRetract), z: zStartLim, rapid: true, line: L.length - 1 });
+      L.push('M5 P12'); L.push('M5 P11'); L.push('M9'); L.push('G28 U0 W0'); L.push('M30'); L.push('%');
+
+      const sim = { moves, wheelOd, wheelW: N(wheel.wheel_width) > 0 ? N(wheel.wheel_width) : 5, wheelWReal: N(wheel.wheel_width), d1, d2, zMin: Math.min(zStartLim, zEndLim), zMax: Math.max(zStartLim, zEndLim), grindWidth: Math.abs(ze - zs), offset: offsetMode, bAngle: bAng, bodyDir: (ze >= zs ? 1 : -1), internal: true };
+      return { code: L.join('\n'), sim };
+    };
+
+    // =========================================================
+    // 단면(FACE) 플런지 — Z절입(단면 위치) + 반경(X) 범위. 외경 플런지의 X↔Z 미러.
+    // =========================================================
+    const generateFacePlunge = () => {
+      const geo = toMap(facePlungeGeometryFields);
+      const cut = toMap(odPlungeCuttingFields);
+      const wheel = toMapAt('tool_setup', wheelSetupFields);
+      const N = (v: any) => parseFloat(v);
+      const f3 = (v: number) => v.toFixed(3);
+
+      const zf1 = N(geo.zf_start), zf2 = N(geo.zf_target);   // Z 절입(단면 위치): zf1→zf2
+      const dO = N(geo.d_outer), dI = N(geo.d_inner);        // 단면 반경 범위(직경)
+      const clr = N(geo.clearance);
+      const zfdir = zf2 < zf1 ? -1 : 1;                       // Z 가공 방향
+      const total = Math.abs(zf1 - zf2);                      // Z 제거량
+      const rO = dO / 2, rI = dI / 2, radBand = Math.max(rO - rI, 0); // 반경폭
+      const workRpm = N(cut.work_rpm), vc = N(cut.wheel_vc);
+      const wheelOd = N(wheel.wheel_od), wheelW = N(wheel.wheel_width); // 휠폭=반경 커버
+      const tCode = wheel.t_code || '0101';
+      const bAng = parseFloat(bAngle);
+      const gCode = paramValues['work_coord:g_code'] ?? '54';
+
+      const warn: string[] = [];
+      if (zf1 === zf2) warn.push('시작/목표 단면 Z가 같습니다 (제거량 0).');
+      if (!(dO > dI)) warn.push('단면 외경(d_outer)이 내경(d_inner)보다 커야 합니다.');
+      const roughOffset = activeStages.rough ? N(cut.rough_offset) : 0; // Z 황삭 옵셋
+      if (activeStages.rough && roughOffset >= total) warn.push(`황삭 옵셋(${roughOffset})이 총제거량(${total.toFixed(3)}) 이상.`);
+      if (!(workRpm > 0)) warn.push('워크 회전수 0 이하.');
+      if (!(wheelOd > 0)) warn.push('휠 외경 0 이하.');
+      if (!(wheelW > 0)) warn.push('휠 폭(반경 커버) 미입력.');
+      const wWr = wheelW > 0 ? wheelW : radBand;
+      // 툴패스 자동분할: 외경(d_outer)→내경(d_inner) 반경밴드를 휠폭(반경)으로 자동 분할. (수동 편집 시 plungePaths 사용)
+      const autoBands = () => { const a: number[] = []; let rem = radBand; while (rem > 1e-6 && wWr > 0) { const c = Math.min(wWr, rem); a.push(c); rem -= c; } return a.length ? a : [radBand]; };
+      const passWv = plungePaths.length > 0 ? plungePaths.map(Number) : autoBands();
+      const sumWv = passWv.reduce((a, b) => a + (Number(b) || 0), 0);
+      if (radBand - sumWv > 0.001) warn.push(`남은 반경폭 ${(radBand - sumWv).toFixed(3)}mm → 툴패스 조정 필요.`);
+
+      const sw = wheelOd > 0 ? Math.round((vc * 60000) / (Math.PI * wheelOd)) : 0;
+      const zApproach = zf1 - zfdir * clr;        // 접근 Z(단면 바깥, 가공 반대쪽)
+      const xc = (d: number) => f3(d);            // 단면은 반경 직접지령(직경 보정 없음)
+
+      // 단계: 황삭=목표면 −zfdir*황삭옵셋(덜 깎음), 정삭=목표면. zf1→zf2 단조.
+      const seqRaw: { lbl: string; t: number; f: any }[] = [];
+      if (activeStages.rough) seqRaw.push({ lbl: 'ROUGH', t: zf2 - zfdir * roughOffset, f: cut.rough_fr });
+      if (activeStages.finish) seqRaw.push({ lbl: 'FINISH', t: zf2, f: cut.finish_fr });
+      if (seqRaw.length) seqRaw[seqRaw.length - 1].t = zf2;
+      const zlo = Math.min(zf1, zf2), zhi = Math.max(zf1, zf2);
+      let prevT = zf1;
+      for (const s of seqRaw) { s.t = Math.min(Math.max(s.t, zlo), zhi); s.t = zfdir < 0 ? Math.min(s.t, prevT) : Math.max(s.t, prevT); prevT = s.t; }
+      const seq = seqRaw.map(s => ({ lbl: s.lbl, t: s.t, f: s.f }));
+      let cur = seqRaw.length ? seqRaw[seqRaw.length - 1].t : zf1;
+
+      const L: string[] = [];
+      const moves: any[] = []; // x=직경(반경위치), z=단면 Z
+      L.push('%');
+      L.push(`O0014 (FACE PLUNGE GRIND / ${selectedProject.name})`);
+      L.push('(WORK:P11-C1  WHEEL:P12  X=DIA  FEED:G98  FACE: Z절입 / 반경범위)');
+      L.push(`(FACE Z:${f3(zf1)}->${f3(zf2)}  RADIAL DIA:${f3(dO)}->${f3(dI)}  ***기계검증***)`);
+      warn.forEach(w => L.push(`(***확인필요*** ${w})`));
+      L.push(`G0 G98 G80 G40 G${gCode}`);
+      L.push('G18');
+      L.push('G28 U0 W0');
+      L.push(`T${tCode}`);
+      L.push(`G400 B${bAng} J1 (***확인필요*** J=인선방향, 단면 휠 등록값 확인)`);
+      L.push('(***확인필요*** 워크회전 P11 + 휠회전 P12 동시운용 - 실제 단면연삭 NC 확인)');
+      L.push('M8');
+      L.push(`G97 M3 S${sw} P12 (WHEEL Vc${vc}M/S @OD${wheelOd}=${sw}RPM)`);
+      L.push(`G97 M3 S${workRpm} P11 (WORK ${workRpm}RPM)`);
+      const doFacePlungeAt = (xDiaStr: string) => {
+        const xD = parseFloat(xDiaStr);
+        L.push(`G0 X${xDiaStr} Z${f3(zApproach)}`); moves.push({ x: xD, z: zApproach, rapid: true, line: L.length - 1 });
+        seq.forEach(s => { L.push(`(--- ${s.lbl} ---)`); L.push(`G1 Z${f3(s.t)} F${s.f}`); moves.push({ x: xD, z: s.t, rapid: false, line: L.length - 1 }); });
+        if (activeStages.spark) {
+          const dw = N(cut.spark_out);
+          if (dw > 0) { L.push('(--- SPARK OUT : DWELL ---)'); L.push(`G4 X${dw.toFixed(1)} (휴지 ${cut.spark_out}s)`); moves.push({ x: xD, z: cur, dwell: dw, rapid: false, line: L.length - 1 }); }
+        }
+        L.push(`G0 Z${f3(zApproach)}`); moves.push({ x: xD, z: zApproach, rapid: true, line: L.length - 1 }); // Z 도피
+      };
+
+      moves.push({ x: dO, z: zApproach, rapid: true, line: L.length - 1 });
+
+      // 반경 툴패스: 외경(rO)→내경(rI)으로 휠폭(반경)씩. X지령=밴드 안쪽 끝(정삭 기준) → 마지막 패스는 내경 d_inner에 정확히 도달.
+      const passW = plungePaths.length > 0 ? plungePaths.map(Number) : autoBands(); // 외경→내경 자동분할
+      let cum = 0;
+      for (let i = 0; i < passW.length && cum < radBand - 1e-6; i++) {
+        const cover = Math.min(Math.max(passW[i] || 0, 0), wWr, radBand - cum);
+        if (cover <= 1e-6) continue;
+        const innerR = rO - (cum + cover);              // 밴드 안쪽 끝 반경(접촉/정삭 기준)
+        const xDia = 2 * innerR;                        // 안쪽 끝 직경지령 (마지막=내경 d_inner)
+        L.push(`(TOOLPATH ${i + 1}/${passW.length} 반경밴드 R${f3(rO - cum)}~R${f3(innerR)} X(안쪽끝) ${f3(xDia)})`);
+        doFacePlungeAt(f3(xDia));
+        cum += cover;
+      }
+
+      // 스파크아웃: 목표 단면(zf2)에서 가공 반경밴드 전체를 X(반경) 왕복
+      if (activeStages.spark) {
+        const oscN = Math.round(N(cut.spark_osc_n) || 0), oscF = cut.spark_osc_feed, over = Math.max(N(cut.spark_osc_overrun) || 0, 0);
+        const xOuter = dO + 2 * over;                   // 외경측(+오버런) 직경
+        const xInner = 2 * (rO - cum) - 2 * over;       // 실가공 안쪽 끝(−오버런) 직경
+        if (oscN > 0 && xOuter - xInner > 1e-6) {
+          L.push(`(=== SPARK OUT : RADIAL OSCILLATION x${oscN} (반경 전구간 왕복) ===)`);
+          L.push(`G0 X${f3(xOuter)} Z${f3(zApproach)}`); moves.push({ x: xOuter, z: zApproach, rapid: true, line: L.length - 1 });
+          L.push(`G1 Z${f3(zf2)} F${oscF}`); moves.push({ x: xOuter, z: zf2, rapid: false, line: L.length - 1 });
+          for (let k = 0; k < oscN; k++) {
+            L.push(`G1 X${f3(xInner)} F${oscF}`); moves.push({ x: xInner, z: zf2, rapid: false, line: L.length - 1 });
+            L.push(`G1 X${f3(xOuter)} F${oscF}`); moves.push({ x: xOuter, z: zf2, rapid: false, line: L.length - 1 });
+          }
+          L.push(`G0 Z${f3(zApproach)}`); moves.push({ x: xOuter, z: zApproach, rapid: true, line: L.length - 1 });
+        }
+      }
+
+      // Z 안전회피 상태에서 바로 원점복귀
+      L.push('M5 P12'); L.push('M5 P11'); L.push('M9'); L.push('G28 U0 W0 (Z안전회피 위치에서 바로 원점복귀)'); L.push('M30'); L.push('%');
+      const sim = {
+        moves, wheelOd, wheelW: wheelW > 0 ? wheelW : Math.max(radBand, 5), wheelWReal: wheelW,
+        d1: dO, d2: dI, zMin: Math.min(zf1, zf2) - clr, zMax: Math.max(zf1, zf2) + clr, grindWidth: total, offset: offsetMode, bAngle: bAng, bodyDir: zfdir, face: true,
+      };
+      return { code: L.join('\n'), sim };
+    };
+
+    // =========================================================
+    // 단면(FACE) 트래버스 — Z절입 + 반경(X) 왕복. 외경 트래버스의 X↔Z 미러.
+    // =========================================================
+    const generateFaceTraverse = () => {
+      const geo = toMap(faceTraverseGeometryFields);
+      const cut = toMap(odTraverseCuttingFields);
+      const wheel = toMapAt('tool_setup', wheelSetupFields);
+      const N = (v: any) => parseFloat(v);
+      const f3 = (v: number) => v.toFixed(3);
+
+      const zf1 = N(geo.zf_start), zf2 = N(geo.zf_target);   // Z 절입
+      const dO = N(geo.d_outer), dI = N(geo.d_inner);        // 반경 왕복 범위(직경)
+      const clr = N(geo.clearance);
+      const ovO = N(geo.over_outer), ovI = N(geo.over_inner);// 반경 오버런(직경)
+      const inO = N(geo.infeed_o), inI = N(geo.infeed_i);    // Z 절입(외경단/내경단)
+      const zig = N(geo.zigzag_angle) || 0;
+      const zigOn = Math.abs(zig) > 1e-6;
+      const workRpm = N(cut.work_rpm), vc = N(cut.wheel_vc);
+      const wheelOd = N(wheel.wheel_od);
+      const tCode = wheel.t_code || '0101';
+      const bAng = parseFloat(bAngle);
+      const gCode = paramValues['work_coord:g_code'] ?? '54';
+      const sw = wheelOd > 0 ? Math.round((vc * 60000) / (Math.PI * wheelOd)) : 0;
+
+      const zfdir = zf2 < zf1 ? -1 : 1;                       // Z 가공 방향
+      const total = Math.abs(zf1 - zf2);
+      const xOuterLim = dO + ovO;                            // 외경 + 오버런
+      const xInnerLim = Math.max(dI - ovI, 0);              // 내경 − 오버런(중심 0 클램프)
+      const span = xInnerLim - xOuterLim;                   // 반경 왕복 스팬(부호, 외경→내경)
+      const sgnExpr = (v: number) => (v >= 0 ? `+${f3(v)}` : `-${f3(-v)}`);
+      const useMacro = travUseMacro && !zigOn;
+      const zApproach = zf1 - zfdir * clr;
+
+      const warn: string[] = [];
+      if (zf1 === zf2) warn.push('시작/목표 단면 Z가 같습니다 (제거량 0).');
+      if (!(dO > dI)) warn.push('단면 외경(d_outer)이 내경(d_inner)보다 커야 합니다.');
+      const roughOffset = activeStages.rough ? N(cut.rough_offset) : 0;
+      if (activeStages.rough && roughOffset >= total) warn.push(`황삭 옵셋(${roughOffset})이 총제거량(${total.toFixed(3)}) 이상.`);
+      const noInfeed = (inO + inI) <= 0;
+      if (noInfeed) warn.push('외경단/내경단 Z절입이 모두 0 → 단계당 1패스로 처리.');
+      if (zigOn) {
+        const infZ = N(geo.zigzag_infeed) || 0;
+        warn.push(`번개(지그재그) 모드 ON: 한 레그=전체 반경(X) 트래버스 중 Z로 ${infZ}/레그 절입.`);
+        if (infZ <= 0) warn.push('번개 Z 1회 절입량이 0 → 1패스 처리. 값 입력 권장.');
+      }
+
+      const L: string[] = [];
+      const moves: any[] = [];
+      L.push('%');
+      L.push(`O0015 (FACE TRAVERSE GRIND / ${selectedProject.name})`);
+      L.push(`(WORK:P11-C1  WHEEL:P12  X=DIA  FEED:G98  FACE  ${useMacro ? 'MACRO-B' : zigOn ? 'ZIGZAG U/W' : 'EXPANDED'})`);
+      L.push(`(FACE Z:${f3(zf1)}->${f3(zf2)}  RADIAL DIA:${f3(dO)}->${f3(dI)}  ***기계검증***)`);
+      warn.forEach(w => L.push(`(***확인필요*** ${w})`));
+      if (useMacro) L.push('(***확인필요*** 커스텀매크로B(#변수/WHILE/IF) - 실제 SMX 확인)');
+      L.push(`G0 G98 G80 G40 G${gCode}`);
+      L.push('G18');
+      L.push('G28 U0 W0');
+      L.push(`T${tCode}`);
+      L.push(`G400 B${bAng} J1 (***확인필요*** J=인선방향)`);
+      L.push('(***확인필요*** 워크회전 P11 + 휠회전 P12 동시운용)');
+      L.push('M8');
+      L.push(`G97 M3 S${sw} P12 (WHEEL Vc${vc}M/S @OD${wheelOd}=${sw}RPM)`);
+      L.push(`G97 M3 S${workRpm} P11 (WORK ${workRpm}RPM)`);
+      if (useMacro) L.push(`#100 = ${f3(zf1)} (CURRENT FACE Z)`);
+      L.push(`G0 X${f3(xOuterLim)} Z${f3(zApproach)}`);
+      moves.push({ x: xOuterLim, z: zApproach, rapid: true, line: L.length - 1 });
+
+      let curZ = zf1;
+      const emitStage = (lbl: string, target: number, fr: any) => {
+        if (Math.abs(target - curZ) <= 1e-6 || (zfdir < 0 ? target >= curZ - 1e-6 : target <= curZ + 1e-6)) return;
+        L.push(`(--- ${lbl} FACE TRAVERSE -> Z ${f3(target)}${zigOn ? ' (ZIGZAG U/W)' : ''} ---)`);
+        const reach = (a: number, b: number) => zfdir < 0 ? a <= b + 1e-6 : a >= b - 1e-6; // curZ가 target 도달?
+        if (zigOn) {
+          let infZ = Math.max(N(geo.zigzag_infeed) || 0, 0);
+          if (infZ <= 1e-9) infZ = inO > 1e-9 ? inO : 0.01;
+          L.push(`G1 Z${f3(curZ)} F${fr}`); moves.push({ x: xOuterLim, z: curZ, rapid: false, line: L.length - 1 });
+          let atOuter = true, guard = 0;
+          while (!reach(curZ, target) && guard < 100000) {
+            guard++;
+            const stepZ = Math.min(infZ, Math.abs(target - curZ));
+            const w = atOuter ? span : -span;     // 반경 왕복(외경↔내경)
+            curZ += zfdir * stepZ;
+            L.push(`G1 W${sgnExpr(w)} U${sgnExpr(zfdir * stepZ)} F${fr}`); // 사선: 반경 이동하며 Z 절입
+            moves.push({ x: atOuter ? xInnerLim : xOuterLim, z: curZ, rapid: false, line: L.length - 1 });
+            atOuter = !atOuter;
+          }
+          L.push(`(--- LEVEL @Z ${f3(target)} ---)`);
+          if (!atOuter) { L.push(`G1 U${sgnExpr(-span)} F${fr}`); moves.push({ x: xOuterLim, z: target, rapid: false, line: L.length - 1 }); }
+          else { L.push(`G1 U${sgnExpr(span)} F${fr}`); moves.push({ x: xInnerLim, z: target, rapid: false, line: L.length - 1 }); L.push(`G1 U${sgnExpr(-span)} F${fr}`); moves.push({ x: xOuterLim, z: target, rapid: false, line: L.length - 1 }); }
+          curZ = target;
+          return;
+        }
+        if (noInfeed) {
+          L.push(`G1 Z${f3(target)} F${fr}`); curZ = target; moves.push({ x: xOuterLim, z: curZ, rapid: false, line: L.length - 1 });
+          L.push(`G1 X${f3(xInnerLim)} F${fr}`); moves.push({ x: xInnerLim, z: target, rapid: false, line: L.length - 1 });
+          L.push(`G1 X${f3(xOuterLim)} F${fr}`); moves.push({ x: xOuterLim, z: target, rapid: false, line: L.length - 1 });
+          return;
+        }
+        let guard = 0;
+        while (!reach(curZ, target) && guard < 100000) {
+          guard++;
+          curZ = zfdir < 0 ? Math.max(curZ - inO, target) : Math.min(curZ + inO, target);
+          L.push(`G1 Z${f3(curZ)} F${fr}`); moves.push({ x: xOuterLim, z: curZ, rapid: false, line: L.length - 1 });
+          L.push(`G1 X${f3(xInnerLim)} F${fr}`); moves.push({ x: xInnerLim, z: curZ, rapid: false, line: L.length - 1 });
+          curZ = zfdir < 0 ? Math.max(curZ - inI, target) : Math.min(curZ + inI, target);
+          L.push(`G1 Z${f3(curZ)} F${fr}`); moves.push({ x: xInnerLim, z: curZ, rapid: false, line: L.length - 1 });
+          L.push(`G1 X${f3(xOuterLim)} F${fr}`); moves.push({ x: xOuterLim, z: curZ, rapid: false, line: L.length - 1 });
+        }
+      };
+
+      const tgts: { lbl: string; t: number; f: any }[] = [];
+      if (activeStages.rough) tgts.push({ lbl: 'ROUGH', t: zf2 - zfdir * roughOffset, f: cut.rough_fr });
+      if (activeStages.finish) tgts.push({ lbl: 'FINISH', t: zf2, f: cut.finish_fr });
+      if (tgts.length) tgts[tgts.length - 1].t = zf2;
+      const zlo = Math.min(zf1, zf2), zhi = Math.max(zf1, zf2);
+      let prevT = zf1;
+      for (const s of tgts) { s.t = Math.min(Math.max(s.t, zlo), zhi); s.t = zfdir < 0 ? Math.min(s.t, prevT) : Math.max(s.t, prevT); prevT = s.t; }
+      tgts.forEach(s => emitStage(s.lbl, s.t, s.f));
+
+      const spk = Math.round(N(cut.spark_out) || 0);
+      const spF = cut.finish_fr || cut.rough_fr;
+      if (activeStages.spark && spk > 0) {
+        L.push(`(--- SPARK OUT FACE TRAVERSE x${spk} ---)`);
+        for (let k = 0; k < spk; k++) {
+          L.push(`G1 X${f3(xInnerLim)} F${spF}`); moves.push({ x: xInnerLim, z: curZ, rapid: false, line: L.length - 1 });
+          L.push(`G1 X${f3(xOuterLim)} F${spF}`); moves.push({ x: xOuterLim, z: curZ, rapid: false, line: L.length - 1 });
+        }
+      }
+      if (activeStages.spark && zigOn) {
+        const dw = N(cut.spark_dwell) || 0;
+        const rubN = Math.round(N(cut.spark_rub_n) || 0);
+        const rubF = cut.spark_rub_feed || spF;
+        if (dw > 0) { L.push(`(--- SPARK DWELL ${dw}s ---)`); L.push(`G4 X${dw.toFixed(1)}`); moves.push({ x: xOuterLim, z: curZ, dwell: dw, rapid: false, line: L.length - 1 }); }
+        if (rubN > 0) { L.push(`(--- SPARK RUB 반경 전구간 비비기 x${rubN} ---)`); for (let k = 0; k < rubN; k++) { L.push(`G1 X${f3(xInnerLim)} F${rubF}`); moves.push({ x: xInnerLim, z: curZ, rapid: false, line: L.length - 1 }); L.push(`G1 X${f3(xOuterLim)} F${rubF}`); moves.push({ x: xOuterLim, z: curZ, rapid: false, line: L.length - 1 }); } }
+      }
+
+      L.push(`G0 Z${f3(zApproach)}`); moves.push({ x: xOuterLim, z: zApproach, rapid: true, line: L.length - 1 });
+      L.push('M5 P12'); L.push('M5 P11'); L.push('M9'); L.push('G28 U0 W0'); L.push('M30'); L.push('%');
+      const sim = { moves, wheelOd, wheelW: N(wheel.wheel_width) > 0 ? N(wheel.wheel_width) : 5, wheelWReal: N(wheel.wheel_width), d1: dO, d2: dI, zMin: Math.min(zf1, zf2) - clr, zMax: Math.max(zf1, zf2) + clr, grindWidth: total, offset: offsetMode, bAngle: bAng, bodyDir: zfdir, face: true };
+      return { code: L.join('\n'), sim };
+    };
+
     const handleGenerateNc = () => {
       if (selectedMenu === 'od_plunge') {
         const r = generateODPlunge();
@@ -775,8 +1430,20 @@ const App = () => {
       } else if (selectedMenu === 'od_traverse') {
         const r = generateODTraverse();
         setNcCode(r.code); setNcSim(r.sim);
+      } else if (selectedMenu === 'id_plunge') {
+        const r = generateIDPlunge();
+        setNcCode(r.code); setNcSim(r.sim);
+      } else if (selectedMenu === 'id_traverse') {
+        const r = generateIDTraverse();
+        setNcCode(r.code); setNcSim(r.sim);
+      } else if (selectedMenu === 'face_plunge') {
+        const r = generateFacePlunge();
+        setNcCode(r.code); setNcSim(r.sim);
+      } else if (selectedMenu === 'face_traverse') {
+        const r = generateFaceTraverse();
+        setNcCode(r.code); setNcSim(r.sim);
       } else {
-        setNcCode(`(${currentMenuInfo?.label ?? ''} 사이클은 아직 NC 생성 미구현)\n(현재 OD 플런지 / OD 트래버스 지원)`);
+        setNcCode(`(${currentMenuInfo?.label ?? ''} 사이클은 아직 NC 생성 미구현)\n(현재 외경/내경 플런지·트래버스 지원)`);
         setNcSim(null);
       }
       setShowNc(true);
@@ -792,9 +1459,13 @@ const App = () => {
     // 현재 사이클 입력값 상황판 데이터 (형상+가공조건 전체, 활성 단계만)
     const geoMap: any = {
       od_plunge: odPlungeGeometryFields, od_traverse: odTraverseGeometryFields,
+      id_plunge: idPlungeGeometryFields, id_traverse: idTraverseGeometryFields,
+      face_plunge: facePlungeGeometryFields, face_traverse: faceTraverseGeometryFields,
     };
     const cutMap: any = {
       od_plunge: odPlungeCuttingFields, od_traverse: odTraverseCuttingFields,
+      id_plunge: odPlungeCuttingFields, id_traverse: odTraverseCuttingFields,
+      face_plunge: odPlungeCuttingFields, face_traverse: odTraverseCuttingFields,
     };
     const boardFields = [...(geoMap[selectedMenu] || []), ...(cutMap[selectedMenu] || [])]
       .filter((f: any) => f && f.value !== undefined && f.type !== 'stageToggle' && f.type !== 'radioGroup' && (!f.stage || (activeStages as any)[f.stage]));
@@ -1136,10 +1807,14 @@ const App = () => {
 
 
                 {/* 외경 연삭 (Plunge/Traverse) 치수 다이어그램 - 입력 포커스/호버 시 해당 부위 하이라이트 */}
-                {(selectedMenu === 'od_plunge' || selectedMenu === 'od_traverse') && activeTab !== 'gauge' && (() => {
-                  const dgf: any[] = selectedMenu === 'od_traverse' ? odTraverseGeometryFields : odPlungeGeometryFields;
+                {(selectedMenu === 'od_plunge' || selectedMenu === 'od_traverse' || selectedMenu === 'id_plunge' || selectedMenu === 'id_traverse' || selectedMenu === 'face_plunge' || selectedMenu === 'face_traverse') && activeTab !== 'gauge' && (() => {
+                  const isFace = selectedMenu === 'face_plunge' || selectedMenu === 'face_traverse';
+                  const dgf: any[] = selectedMenu === 'od_traverse' ? odTraverseGeometryFields : selectedMenu === 'id_traverse' ? idTraverseGeometryFields : selectedMenu === 'id_plunge' ? idPlungeGeometryFields : selectedMenu === 'face_plunge' ? facePlungeGeometryFields : selectedMenu === 'face_traverse' ? faceTraverseGeometryFields : odPlungeGeometryFields;
                   const dgn = (id: string) => { const f: any = dgf.find((x: any) => x.id === id); return f ? parseFloat(gv(f)) : 0; };
-                  return <CycleDiagram menu={selectedMenu} tab={activeTab} field={activeField} zs={dgn('z_start')} ze={dgn('z_end')} d1v={dgn('d1')} d2v={dgn('d2')} />;
+                  // 단면은 zf_start/zf_target/d_outer/d_inner를 zs/ze/d1/d2로 매핑
+                  return <CycleDiagram menu={selectedMenu} tab={activeTab} field={activeField}
+                    zs={isFace ? dgn('zf_start') : dgn('z_start')} ze={isFace ? dgn('zf_target') : dgn('z_end')}
+                    d1v={isFace ? dgn('d_outer') : dgn('d1')} d2v={isFace ? dgn('d_inner') : dgn('d2')} />;
                 })()}
                 
               </div>
@@ -1397,17 +2072,22 @@ const App = () => {
                       })}
                       
                       {/* 플런지 툴패스 (자동분할 없음 · 가공시작부터 휠폭씩, 남으면 추가) */}
-                      {selectedMenu === 'od_plunge' && activeTab === 'geometry' && (() => {
-                        const gwv = Math.abs(parseFloat(paramValues['od_plunge:width'] ?? '25.000') || 0);
+                      {(selectedMenu === 'od_plunge' || selectedMenu === 'id_plunge' || selectedMenu === 'face_plunge') && activeTab === 'geometry' && (() => {
+                        const gwv = selectedMenu === 'face_plunge'
+                          ? Math.abs((parseFloat(paramValues['face_plunge:d_outer'] ?? '50') - parseFloat(paramValues['face_plunge:d_inner'] ?? '0')) / 2)
+                          : Math.abs(parseFloat(paramValues[`${selectedMenu}:width`] ?? '25.000') || 0);
                         const wwv = parseFloat(paramValues['tool_setup:wheel_width'] ?? '20.000') || 0;
-                        const eff = plungePaths.length > 0 ? plungePaths : [Math.min(wwv || gwv, gwv)]; // 표시용 패스 목록
+                        const isFaceP = selectedMenu === 'face_plunge';
+                        // 단면 플런지: 외경→내경 반경밴드를 휠폭으로 자동 분할(수동 편집 전까지)
+                        const autoEff = () => { const a: number[] = []; let rem = gwv; while (rem > 1e-6 && wwv > 0) { const c = Math.min(wwv, rem); a.push(c); rem -= c; } return a.length ? a : [gwv]; };
+                        const eff = plungePaths.length > 0 ? plungePaths : (isFaceP ? autoEff() : [Math.min(wwv || gwv, gwv)]); // 표시용 패스 목록
                         const sumW = eff.reduce((a, b) => a + (Number(b) || 0), 0);
                         const remain = gwv - sumW;
                         const commit = (arr: number[]) => setPlungePaths(arr);
                         return (
                           <div className="mt-2 p-4 bg-blue-50/40 border border-blue-200 rounded-xl space-y-2">
                             <div className="flex items-center justify-between">
-                              <span className="text-[11px] font-black text-blue-700">플런지 툴패스 (가공길이 {gwv} / 휠폭 {wwv})</span>
+                              <span className="text-[11px] font-black text-blue-700">{isFaceP ? `단면 플런지 툴패스 (반경폭 ${gwv} / 휠폭 ${wwv}, 외경→내경 자동분할)` : `플런지 툴패스 (가공길이 ${gwv} / 휠폭 ${wwv})`}</span>
                               <span className="text-[10px] font-mono text-slate-500">{eff.length}패스 · 남은 {remain.toFixed(2)}mm</span>
                             </div>
                             <div className="space-y-1">
@@ -1421,7 +2101,7 @@ const App = () => {
                               ))}
                             </div>
                             <button onClick={() => commit([...eff, Math.min(wwv || gwv, Math.max(0.001, remain))])} disabled={remain <= 0.001} className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${remain > 0.001 ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}><Plus size={12} /> 툴패스 추가</button>
-                            <div className="text-[10px] text-slate-500">각 패스 = 가공시작에서 이어서 해당 길이만큼 황삭+정삭 플런지. 길이는 휠폭 이하로 입력하세요.</div>
+                            <div className="text-[10px] text-slate-500">{isFaceP ? '단면 외경(시작)→내경(정삭종료) 반경밴드를 휠폭으로 자동 분할. 값 수정 시 수동 모드로 전환됩니다.' : '각 패스 = 가공시작에서 이어서 해당 길이만큼 황삭+정삭 플런지. 길이는 휠폭 이하로 입력하세요.'}</div>
                           </div>
                         );
                       })()}
@@ -1495,7 +2175,7 @@ const App = () => {
             <button onClick={handleGenerateNc} className="flex items-center px-6 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 font-bold text-sm hover:bg-slate-50 transition-all">
               <FileText size={16} className="mr-2" /> NC 코드
             </button>
-            {selectedMenu === 'od_traverse' && (
+            {(selectedMenu === 'od_traverse' || selectedMenu === 'id_traverse' || selectedMenu === 'face_traverse') && (
               <div className="flex items-center bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold overflow-hidden">
                 <span className="px-2.5 text-slate-400">출력</span>
                 <button onClick={() => setTravUseMacro(true)} className={`px-3 py-2.5 transition-colors ${travUseMacro ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-200'}`}>WHILE</button>
