@@ -29,6 +29,8 @@ const CYCLE_TYPES = [
   { id: 'id_traverse', label: '내경 연삭 (Traverse)', desc: 'Inner Diameter Traverse Cycle', icon: ArrowLeftRight },
   { id: 'face_plunge', label: '단면 연삭 (Plunge)', desc: 'Face Plunge Cycle', icon: MoveDiagonal },
   { id: 'face_traverse', label: '단면 연삭 (Traverse)', desc: 'Face Traverse Cycle', icon: ArrowLeftRight },
+  { id: 'dress_od', label: '휠 외경 드레싱 (Traverse)', desc: 'Wheel OD Dressing (Single Point)', icon: Wrench },
+  { id: 'dress_face', label: '휠 단면 드레싱 (Traverse)', desc: 'Wheel Face Dressing (Single Point)', icon: Wrench },
 ];
 
 const ALL_MENUS = [...SETUP_TYPES, ...CYCLE_TYPES];
@@ -429,6 +431,32 @@ const App = () => {
       { id: 'infeed_i', label: '내경단 Z절입량 (Infeed Inner)', unit: 'mm', value: '0.000', desc: '[직선 전용] 내경단에서 방향 전환 시 1회 Z절입량. (번개모드 미사용)' }
     ];
 
+    // --- 휠 외경 드레싱 (싱글포인트 · 트래버스) ---
+    const dressODGeometryFields = [
+      { id: 'dress_total', label: '총 드레싱량 (직경)', unit: 'mm', value: '0.100', desc: '휠 외경에서 제거할 총 직경량.' },
+      { id: 'dress_depth', label: '1회 드레싱 절입 (직경)', unit: 'mm', value: '0.020', desc: '패스당 외경 감소량(직경). 패스 수 = 총 드레싱량 ÷ 이 값.' },
+      { id: 'zigzag_angle', label: '트래버스 지그재그 각도', unit: 'deg', value: '0.000', desc: '0=직선(절입→폭 트래버스). >0=지그재그: 폭(Z) 트래버스 중 외경(X)을 사선으로 절입.' },
+      { id: 'over_run', label: '폭 오버런 (양끝)', unit: 'mm', value: '2.000', desc: '드레서가 휠 폭 양끝을 벗어나 더 나가는 거리.' },
+      { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '1.000', desc: '접근 시 휠 외경 바깥 도피량.' }
+    ];
+
+    const dressODCuttingFields = [
+      { id: 'dress_vc', label: '드레싱 휠 주속 (Vc)', unit: 'm/s', value: '25', desc: '드레싱 시 휠 표면 속도(외경에서 rpm 자동 산출).' },
+      { id: 'traverse_feed', label: '드레싱 이송 (Traverse)', unit: 'mm/min', value: '300', desc: '드레싱 왕복 트래버스 이송 속도.' },
+      { id: 'infeed_feed', label: '절입 이송 (Infeed)', unit: 'mm/min', value: '100', desc: '절입 시 이송 속도.' },
+      { id: 'spark_pass', label: '무절입 패스 (Spark)', unit: 'Times', value: '1', desc: '최종 치수에서 절입 없이 왕복하는 횟수.' }
+    ];
+
+    // --- 휠 단면(측면) 드레싱 (싱글포인트 · 트래버스) ---
+    const dressFaceGeometryFields = [
+      { id: 'dress_total', label: '총 드레싱량 (축방향)', unit: 'mm', value: '0.050', desc: '휠 측면에서 축(Z)방향으로 제거할 총량.' },
+      { id: 'dress_depth', label: '1회 드레싱 절입 (축방향)', unit: 'mm', value: '0.010', desc: '패스당 축(Z) 절입량. 패스 수 = 총 드레싱량 ÷ 이 값.' },
+      { id: 'd_inner', label: '단면 드레싱 내경 (반경 한계)', unit: 'mm', value: '50.000', desc: '측면을 반경 방향으로 어디까지(내경) 드레싱할지. 휠 허브/원하는 한계.' },
+      { id: 'zigzag_angle', label: '트래버스 지그재그 각도', unit: 'deg', value: '0.000', desc: '0=직선(절입→반경 트래버스). >0=지그재그: 반경(X) 트래버스 중 축(Z)을 사선으로 절입.' },
+      { id: 'over_run', label: '반경 오버런 (외경측)', unit: 'mm', value: '2.000', desc: '드레서가 휠 외경을 벗어나 더 나가는 직경량.' },
+      { id: 'clearance', label: '안전 거리 (Clearance)', unit: 'mm', value: '1.000', desc: '접근 시 휠 측면 바깥(축) 도피량.' }
+    ];
+
 
     const isSetupMode = (currentMenuInfo as any)?.isSetup;
     const isDressingMode = (currentMenuInfo as any)?.isDress;
@@ -453,6 +481,8 @@ const App = () => {
         if (selectedMenu === 'id_traverse') return idTraverseGeometryFields;
         if (selectedMenu === 'face_plunge') return facePlungeGeometryFields;
         if (selectedMenu === 'face_traverse') return faceTraverseGeometryFields;
+        if (selectedMenu === 'dress_od') return dressODGeometryFields;
+        if (selectedMenu === 'dress_face') return dressFaceGeometryFields;
         return [];
       }
       if (activeTab === 'cutting') {
@@ -462,6 +492,8 @@ const App = () => {
         if (selectedMenu === 'id_traverse') return odTraverseCuttingFields;
         if (selectedMenu === 'face_plunge') return odPlungeCuttingFields;
         if (selectedMenu === 'face_traverse') return odTraverseCuttingFields;
+        if (selectedMenu === 'dress_od') return dressODCuttingFields;
+        if (selectedMenu === 'dress_face') return dressODCuttingFields;
         return [];
       }
       return [];
@@ -1423,6 +1455,176 @@ const App = () => {
       return { code: L.join('\n'), sim };
     };
 
+    // =========================================================
+    // 휠 외경 드레싱 (싱글포인트 · 트래버스) — 고정 드레서에 휠 외주를 접촉시켜 폭 방향 왕복하며 외경 절입.
+    // 좌표: X=휠 외경(직경), Z=휠 폭 방향. 드레서 좌표계(G59) 사용. (드레서 위치/축계 ***기계검증***)
+    // =========================================================
+    const generateDressODTraverse = () => {
+      const geo = toMap(dressODGeometryFields);
+      const cut = toMap(dressODCuttingFields);
+      const wheel = toMapAt('tool_setup', wheelSetupFields);
+      const N = (v: any) => parseFloat(v);
+      const f3 = (v: number) => v.toFixed(3);
+
+      const wheelOd = N(wheel.wheel_od), wheelW = N(wheel.wheel_width);
+      const tCode = wheel.t_code || '0101';
+      const dresserNo = activeSingleDressers.d1 ? '1' : (activeSingleDressers.d2 ? '2' : '1'); // 설정의 활성 드레서 자동 선택
+      const total = N(geo.dress_total), depth = N(geo.dress_depth), ovr = N(geo.over_run), clr = N(geo.clearance);
+      const zig = N(geo.zigzag_angle) || 0, zigOn = Math.abs(zig) > 1e-6;
+      const vc = N(cut.dress_vc), trF = N(cut.traverse_feed), inF = N(cut.infeed_feed);
+      const sparkPass = Math.round(N(cut.spark_pass) || 0);
+      const bAng = parseFloat(bAngle);
+      const dG = '59'; // 드레서 좌표계 (***확인필요*** 실제 드레서 G코드)
+      const dPos = dresserNo === '2' ? { x: dresserCoordData.x2, z: dresserCoordData.z2 } : { x: dresserCoordData.x1, z: dresserCoordData.z1 };
+      const sw = wheelOd > 0 ? Math.round((vc * 60000) / (Math.PI * wheelOd)) : 0;
+      const d2 = wheelOd - total; // 드레싱 후 외경
+
+      const warn: string[] = [];
+      if (!(total > 0)) warn.push('총 드레싱량이 0 이하입니다.');
+      if (!(depth > 0)) warn.push('1회 드레싱 절입이 0 이하입니다.');
+      if (!(wheelOd > 0)) warn.push('휠 외경이 0 이하입니다 (공구설정).');
+      if (!(wheelW > 0)) warn.push('휠 폭이 0 이하입니다 (공구설정).');
+      if (d2 <= 0) warn.push('드레싱 후 외경이 0 이하입니다 (총 드레싱량 과다).');
+
+      const zL = -ovr, zR = wheelW + ovr;     // 폭 양끝 + 오버런
+      const xApproach = wheelOd + 2 * clr;
+
+      const L: string[] = [];
+      const moves: any[] = [];
+      L.push('%');
+      L.push(`O0016 (WHEEL OD DRESSING - TRAVERSE / SINGLE POINT #${dresserNo})`);
+      L.push('(TOOL:DRESSER  WHEEL:P12 회전  X=DIA(휠외경)  Z=휠폭  FEED:G98)');
+      L.push(`(DRESSER #${dresserNo} @ X${dPos.x} Z${dPos.z} (드레서좌표 G${dG}) ***기계검증***)`);
+      L.push(`(드레싱 외경 ${f3(wheelOd)} -> ${f3(d2)} (총 ${f3(total)}), 절입 ${f3(depth)}/패스${zigOn ? `, 지그재그 ${zig}°` : ''})`);
+      warn.forEach(w => L.push(`(***확인필요*** ${w})`));
+      L.push(`G0 G98 G80 G40 G${dG}`);
+      L.push('G18');
+      L.push('G28 U0 W0');
+      L.push(`T${tCode} (***확인필요*** 드레서 공구번호)`);
+      L.push(`(***확인필요*** B축 ${bAng}° - 드레서가 휠 외주에 직각 접촉하도록 정렬)`);
+      L.push('M8');
+      L.push(`G97 M3 S${sw} P12 (WHEEL Vc${vc}M/S @OD${wheelOd}=${sw}RPM, 드레싱 회전)`);
+      L.push('(워크 스핀들 P11 미사용 - 드레싱)');
+      L.push(`G0 X${f3(xApproach)} Z${f3(zL)}`);
+      moves.push({ x: xApproach, z: zL, rapid: true, line: L.length - 1 });
+
+      // 패스: 외경 wheelOd → d2, 패스마다 depth(직경) 절입 후 폭 왕복
+      let curDia = wheelOd, guard = 0, atL = true;
+      while (curDia > d2 + 1e-6 && guard < 100000) {
+        guard++;
+        curDia = Math.max(curDia - depth, d2);
+        const to = atL ? zR : zL;
+        if (zigOn) {
+          L.push(`(--- DRESS PASS(ZIG) -> OD ${f3(curDia)} @Z${f3(to)} ---)`);
+          L.push(`G1 X${f3(curDia)} Z${f3(to)} F${trF}`); moves.push({ x: curDia, z: to, rapid: false, line: L.length - 1 }); // 폭 트래버스 중 외경 사선 절입
+        } else {
+          L.push(`(--- DRESS PASS -> OD ${f3(curDia)} ---)`);
+          L.push(`G1 X${f3(curDia)} F${inF}`); moves.push({ x: curDia, z: atL ? zL : zR, rapid: false, line: L.length - 1 }); // 외경 절입
+          L.push(`G1 Z${f3(to)} F${trF}`); moves.push({ x: curDia, z: to, rapid: false, line: L.length - 1 });               // 폭 방향 트래버스
+        }
+        atL = !atL;
+      }
+      // 무절입 스파크 왕복 (최종 외경)
+      for (let k = 0; k < sparkPass; k++) {
+        const to = atL ? zR : zL;
+        L.push(`(--- DRESS SPARK ${k + 1}/${sparkPass} ---)`);
+        L.push(`G1 Z${f3(to)} F${trF}`); moves.push({ x: d2, z: to, rapid: false, line: L.length - 1 });
+        atL = !atL;
+      }
+
+      L.push(`G0 X${f3(xApproach)}`); moves.push({ x: xApproach, z: atL ? zL : zR, rapid: true, line: L.length - 1 });
+      L.push('M5 P12'); L.push('M9'); L.push('G28 U0 W0'); L.push('M30'); L.push('%');
+      const sim = {
+        moves, wheelOd: 4, wheelW: 2, wheelWReal: 2, // 시뮬: 드레서를 작은 포인트로 표시
+        d1: wheelOd, d2, zMin: zL, zMax: zR, grindWidth: wheelW, offset: 'x_plus', bAngle: bAng, bodyDir: 1, dress: true,
+      };
+      return { code: L.join('\n'), sim };
+    };
+
+    // =========================================================
+    // 휠 단면(측면) 드레싱 (싱글포인트 · 트래버스) — 휠 측면을 반경(X) 트래버스 + 축(Z) 절입으로 트루잉. OD 드레싱의 X↔Z 미러.
+    // 좌표: X=반경(휠 면 위치), Z=축방향(면 절입). 드레서 좌표계 G59. (***기계검증***)
+    // =========================================================
+    const generateDressFaceTraverse = () => {
+      const geo = toMap(dressFaceGeometryFields);
+      const cut = toMap(dressODCuttingFields);
+      const wheel = toMapAt('tool_setup', wheelSetupFields);
+      const N = (v: any) => parseFloat(v);
+      const f3 = (v: number) => v.toFixed(3);
+
+      const wheelOd = N(wheel.wheel_od);
+      const tCode = wheel.t_code || '0101';
+      const dresserNo = activeSingleDressers.d1 ? '1' : (activeSingleDressers.d2 ? '2' : '1'); // 설정의 활성 드레서 자동 선택
+      const total = N(geo.dress_total), depth = N(geo.dress_depth), dInner = N(geo.d_inner), ovr = N(geo.over_run), clr = N(geo.clearance);
+      const zig = N(geo.zigzag_angle) || 0, zigOn = Math.abs(zig) > 1e-6;
+      const vc = N(cut.dress_vc), trF = N(cut.traverse_feed), inF = N(cut.infeed_feed);
+      const sparkPass = Math.round(N(cut.spark_pass) || 0);
+      const bAng = parseFloat(bAngle);
+      const dG = '59';
+      const dPos = dresserNo === '2' ? { x: dresserCoordData.x2, z: dresserCoordData.z2 } : { x: dresserCoordData.x1, z: dresserCoordData.z1 };
+      const sw = wheelOd > 0 ? Math.round((vc * 60000) / (Math.PI * wheelOd)) : 0;
+
+      const warn: string[] = [];
+      if (!(total > 0)) warn.push('총 드레싱량(축)이 0 이하입니다.');
+      if (!(depth > 0)) warn.push('1회 드레싱 절입(축)이 0 이하입니다.');
+      if (!(wheelOd > 0)) warn.push('휠 외경이 0 이하입니다 (공구설정).');
+      if (!(dInner < wheelOd)) warn.push('단면 드레싱 내경이 휠 외경보다 작아야 합니다.');
+
+      const xOuter = wheelOd + 2 * ovr;       // 반경 외측(휠 OD) + 오버런
+      const xInner = dInner;                  // 반경 내측 한계
+      const zApproach = -clr;                  // 축방향 접근(가공 측면 쪽 −Z에서 접근 → +Z로 절입)
+
+      const L: string[] = [];
+      const moves: any[] = [];
+      L.push('%');
+      L.push(`O0017 (WHEEL FACE DRESSING - TRAVERSE / SINGLE POINT #${dresserNo})`);
+      L.push('(TOOL:DRESSER  WHEEL:P12 회전  X=반경  Z=축(면 절입)  FEED:G98)');
+      L.push(`(DRESSER #${dresserNo} @ X${dPos.x} Z${dPos.z} (드레서좌표 G${dG}) ***기계검증***)`);
+      L.push(`(단면 드레싱 축 제거 ${f3(total)} (절입 ${f3(depth)}/패스), 반경 ${f3(wheelOd)}->${f3(dInner)}${zigOn ? `, 지그재그 ${zig}°` : ''})`);
+      warn.forEach(w => L.push(`(***확인필요*** ${w})`));
+      L.push(`G0 G98 G80 G40 G${dG}`);
+      L.push('G18');
+      L.push('G28 U0 W0');
+      L.push(`T${tCode} (***확인필요*** 드레서 공구번호)`);
+      L.push(`(***확인필요*** B축 ${bAng}° - 드레서가 휠 측면에 직각 접촉하도록 정렬)`);
+      L.push('M8');
+      L.push(`G97 M3 S${sw} P12 (WHEEL Vc${vc}M/S @OD${wheelOd}=${sw}RPM, 드레싱 회전)`);
+      L.push('(워크 스핀들 P11 미사용 - 드레싱)');
+      L.push(`G0 X${f3(xOuter)} Z${f3(zApproach)}`);
+      moves.push({ x: xOuter, z: zApproach, rapid: true, line: L.length - 1 });
+
+      // 패스: 면 축 Z=0 → +total(가공면 안쪽으로), 패스마다 depth(축) 절입 후 반경(X) 외경↔내경 트래버스
+      let curZ = 0, guard = 0, atOut = true;
+      while (curZ < total - 1e-6 && guard < 100000) {
+        guard++;
+        curZ = Math.min(curZ + depth, total);
+        const to = atOut ? xInner : xOuter;
+        if (zigOn) {
+          L.push(`(--- DRESS PASS(ZIG) -> 면Z ${f3(curZ)} @X${f3(to)} ---)`);
+          L.push(`G1 Z${f3(curZ)} X${f3(to)} F${trF}`); moves.push({ x: to, z: curZ, rapid: false, line: L.length - 1 }); // 반경 트래버스 중 축 사선 절입
+        } else {
+          L.push(`(--- DRESS PASS -> 면Z ${f3(curZ)} ---)`);
+          L.push(`G1 Z${f3(curZ)} F${inF}`); moves.push({ x: atOut ? xOuter : xInner, z: curZ, rapid: false, line: L.length - 1 }); // 축 절입
+          L.push(`G1 X${f3(to)} F${trF}`); moves.push({ x: to, z: curZ, rapid: false, line: L.length - 1 });                       // 반경 트래버스
+        }
+        atOut = !atOut;
+      }
+      for (let k = 0; k < sparkPass; k++) {
+        const to = atOut ? xInner : xOuter;
+        L.push(`(--- DRESS SPARK ${k + 1}/${sparkPass} ---)`);
+        L.push(`G1 X${f3(to)} F${trF}`); moves.push({ x: to, z: total, rapid: false, line: L.length - 1 });
+        atOut = !atOut;
+      }
+
+      L.push(`G0 Z${f3(zApproach)}`); moves.push({ x: atOut ? xOuter : xInner, z: zApproach, rapid: true, line: L.length - 1 });
+      L.push('M5 P12'); L.push('M9'); L.push('G28 U0 W0'); L.push('M30'); L.push('%');
+      const sim = {
+        moves, wheelOd: 4, wheelW: 2, wheelWReal: 2,
+        d1: wheelOd, d2: dInner, zMin: zApproach, zMax: total + clr, grindWidth: total, offset: 'x_plus', bAngle: bAng, bodyDir: 1, dress: true, face: true,
+      };
+      return { code: L.join('\n'), sim };
+    };
+
     const handleGenerateNc = () => {
       if (selectedMenu === 'od_plunge') {
         const r = generateODPlunge();
@@ -1441,6 +1643,12 @@ const App = () => {
         setNcCode(r.code); setNcSim(r.sim);
       } else if (selectedMenu === 'face_traverse') {
         const r = generateFaceTraverse();
+        setNcCode(r.code); setNcSim(r.sim);
+      } else if (selectedMenu === 'dress_od') {
+        const r = generateDressODTraverse();
+        setNcCode(r.code); setNcSim(r.sim);
+      } else if (selectedMenu === 'dress_face') {
+        const r = generateDressFaceTraverse();
         setNcCode(r.code); setNcSim(r.sim);
       } else {
         setNcCode(`(${currentMenuInfo?.label ?? ''} 사이클은 아직 NC 생성 미구현)\n(현재 외경/내경 플런지·트래버스 지원)`);
@@ -1461,11 +1669,13 @@ const App = () => {
       od_plunge: odPlungeGeometryFields, od_traverse: odTraverseGeometryFields,
       id_plunge: idPlungeGeometryFields, id_traverse: idTraverseGeometryFields,
       face_plunge: facePlungeGeometryFields, face_traverse: faceTraverseGeometryFields,
+      dress_od: dressODGeometryFields, dress_face: dressFaceGeometryFields,
     };
     const cutMap: any = {
       od_plunge: odPlungeCuttingFields, od_traverse: odTraverseCuttingFields,
       id_plunge: odPlungeCuttingFields, id_traverse: odTraverseCuttingFields,
       face_plunge: odPlungeCuttingFields, face_traverse: odTraverseCuttingFields,
+      dress_od: dressODCuttingFields, dress_face: dressODCuttingFields,
     };
     const boardFields = [...(geoMap[selectedMenu] || []), ...(cutMap[selectedMenu] || [])]
       .filter((f: any) => f && f.value !== undefined && f.type !== 'stageToggle' && f.type !== 'radioGroup' && (!f.stage || (activeStages as any)[f.stage]));
@@ -1807,11 +2017,16 @@ const App = () => {
 
 
                 {/* 외경 연삭 (Plunge/Traverse) 치수 다이어그램 - 입력 포커스/호버 시 해당 부위 하이라이트 */}
-                {(selectedMenu === 'od_plunge' || selectedMenu === 'od_traverse' || selectedMenu === 'id_plunge' || selectedMenu === 'id_traverse' || selectedMenu === 'face_plunge' || selectedMenu === 'face_traverse') && activeTab !== 'gauge' && (() => {
+                {(selectedMenu === 'od_plunge' || selectedMenu === 'od_traverse' || selectedMenu === 'id_plunge' || selectedMenu === 'id_traverse' || selectedMenu === 'face_plunge' || selectedMenu === 'face_traverse' || selectedMenu === 'dress_od' || selectedMenu === 'dress_face') && activeTab !== 'gauge' && (() => {
                   const isFace = selectedMenu === 'face_plunge' || selectedMenu === 'face_traverse';
-                  const dgf: any[] = selectedMenu === 'od_traverse' ? odTraverseGeometryFields : selectedMenu === 'id_traverse' ? idTraverseGeometryFields : selectedMenu === 'id_plunge' ? idPlungeGeometryFields : selectedMenu === 'face_plunge' ? facePlungeGeometryFields : selectedMenu === 'face_traverse' ? faceTraverseGeometryFields : odPlungeGeometryFields;
+                  const isDress = selectedMenu === 'dress_od' || selectedMenu === 'dress_face';
+                  const dgf: any[] = selectedMenu === 'od_traverse' ? odTraverseGeometryFields : selectedMenu === 'id_traverse' ? idTraverseGeometryFields : selectedMenu === 'id_plunge' ? idPlungeGeometryFields : selectedMenu === 'face_plunge' ? facePlungeGeometryFields : selectedMenu === 'face_traverse' ? faceTraverseGeometryFields : selectedMenu === 'dress_od' ? dressODGeometryFields : selectedMenu === 'dress_face' ? dressFaceGeometryFields : odPlungeGeometryFields;
                   const dgn = (id: string) => { const f: any = dgf.find((x: any) => x.id === id); return f ? parseFloat(gv(f)) : 0; };
-                  // 단면은 zf_start/zf_target/d_outer/d_inner를 zs/ze/d1/d2로 매핑
+                  const wheelOdv = parseFloat(paramValues['tool_setup:wheel_od'] ?? '350') || 350;
+                  const wheelWv = parseFloat(paramValues['tool_setup:wheel_width'] ?? '20') || 20;
+                  // 단면은 zf_*/d_*를, 드레싱은 휠외경/총드레싱량/오버런/폭(또는 내경)을 매핑
+                  if (selectedMenu === 'dress_od') return <CycleDiagram menu={selectedMenu} tab={activeTab} field={activeField} zs={dgn('over_run')} ze={wheelWv} d1v={wheelOdv} d2v={dgn('dress_total')} />;
+                  if (selectedMenu === 'dress_face') return <CycleDiagram menu={selectedMenu} tab={activeTab} field={activeField} zs={dgn('over_run')} ze={dgn('d_inner')} d1v={wheelOdv} d2v={dgn('dress_total')} />;
                   return <CycleDiagram menu={selectedMenu} tab={activeTab} field={activeField}
                     zs={isFace ? dgn('zf_start') : dgn('z_start')} ze={isFace ? dgn('zf_target') : dgn('z_end')}
                     d1v={isFace ? dgn('d_outer') : dgn('d1')} d2v={isFace ? dgn('d_inner') : dgn('d2')} />;
