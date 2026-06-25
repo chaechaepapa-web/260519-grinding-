@@ -104,84 +104,84 @@ export const CycleDiagram = ({ menu, tab, field, zs = 100, ze = 75, d1v = 0, d2v
 
   // ===== 휠 외경 드레싱 도식: 회전 휠(정면) + 싱글포인트 드레서 =====
   if (menu === 'dress_od') {
-    const cax = 205;                 // 스핀들 축선
-    const odTop = 66, dressTop = 80; // 휠 외경 상단 / 드레싱 후 외경
+    // 180° 회전(원본 대비): 스핀들 축선=가로(상), 외경(X)=아래, 휠 폭(Z)=가로, 드레서=하단(위로 접촉)
+    const cax = 54;                  // 스핀들 축선(가로, 상단) = 휠 중심
+    const odBot = 188, dressBot = odBot - 14; // 휠 외경(하) / 드레싱 후
     const wL = 150, wR = 330, wMid = (wL + wR) / 2;
-    const ovPx = 24;                 // 오버런 시각 길이
+    const ovPx = 22;
     return (
       <svg viewBox="0 0 470 250" className="w-full max-w-lg drop-shadow-sm">
-        {/* 밀링 스핀들(P12) 표시 */}
-        <rect x={wMid - 16} y={cax - 2} width={32} height={30} fill="#cbd5e1" stroke="#64748b" strokeWidth={1.2} />
-        <text x={wMid} y={cax + 44} fill="#475569" fontSize="9" fontWeight={700} textAnchor="middle">밀링 스핀들 P12 (휠 회전)</text>
-        {/* 스핀들 축선 */}
+        {/* 밀링 스핀들(P12) - 상단 */}
+        <rect x={wMid - 16} y={cax - 30} width={32} height={30} fill="#cbd5e1" stroke="#64748b" strokeWidth={1.2} />
+        <text x={wMid} y={cax - 36} fill="#475569" fontSize="9" fontWeight={700} textAnchor="middle">밀링 스핀들 P12 (휠 회전)</text>
+        {/* 스핀들 축선(가로, 상단) */}
         <line x1={110} y1={cax} x2={370} y2={cax} stroke="#cbd5e1" strokeWidth={1} strokeDasharray="7 4" />
-        {/* 휠 (정면 상반부) */}
-        <rect x={wL} y={odTop} width={wR - wL} height={cax - odTop} fill="#eef2f7" stroke={sc('dress_total')} strokeWidth={sw2('dress_total')} />
-        {/* 드레싱 제거층(총 드레싱량) */}
-        <rect x={wL} y={odTop} width={wR - wL} height={dressTop - odTop} fill="#fde68a" stroke={on('dress_total') ? '#f59e0b' : '#fb923c'} strokeWidth={on('dress_total') ? 3 : 1.6} />
-        <text x={wMid} y={(odTop + cax) / 2} fill="#94a3b8" fontSize="11" fontWeight={700} textAnchor="middle">GRINDING WHEEL</text>
+        {/* 휠 (중심 상 → 외경 하) */}
+        <rect x={wL} y={cax} width={wR - wL} height={odBot - cax} fill="#eef2f7" stroke={sc('dress_total')} strokeWidth={sw2('dress_total')} />
+        {/* 드레싱 제거층(총 드레싱량) - 외경(하) */}
+        <rect x={wL} y={dressBot} width={wR - wL} height={odBot - dressBot} fill="#fde68a" stroke={on('dress_total') ? '#f59e0b' : '#fb923c'} strokeWidth={on('dress_total') ? 3 : 1.6} />
+        <text x={wMid} y={(cax + odBot) / 2} fill="#94a3b8" fontSize="11" fontWeight={700} textAnchor="middle">GRINDING WHEEL</text>
         {/* 휠 회전 arc (주속) */}
-        <path d={`M ${wMid - 22},${(odTop + cax) / 2 + 24} A 22 22 0 1 1 ${wMid - 21},${(odTop + cax) / 2 + 24}`} fill="none" stroke={on('dress_vc') ? '#f59e0b' : '#fb923c'} strokeWidth={on('dress_vc') ? 3 : 1.6} />
+        <path d={`M ${wMid - 22},${(cax + odBot) / 2 - 24} A 22 22 0 1 1 ${wMid - 21},${(cax + odBot) / 2 - 24}`} fill="none" stroke={on('dress_vc') ? '#f59e0b' : '#fb923c'} strokeWidth={on('dress_vc') ? 3 : 1.6} />
 
-        {/* 싱글포인트 드레서: 홀더 + 다이아 팁(아래로 휠 외주 접촉) */}
+        {/* 싱글포인트 드레서: 하단에서 외경 접촉, 팁 위로 */}
         <g>
-          <rect x={wMid - 7} y={18} width={14} height={20} fill={on('dresser_no') ? '#f59e0b' : '#64748b'} stroke="#334155" strokeWidth={1} rx={2} />
-          <polygon points={`${wMid - 7},38 ${wMid + 7},38 ${wMid},${odTop - 1}`} fill={on('dresser_no') ? '#fbbf24' : '#94a3b8'} stroke="#334155" strokeWidth={1} />
-          <circle cx={wMid} cy={odTop - 2} r={2.5} fill="#22d3ee" />
-          <text x={wMid + 12} y={28} fill={tc('dresser_no')} fontSize="9" fontWeight={tw('dresser_no')}>싱글포인트 드레서</text>
+          <rect x={wMid - 7} y={odBot + 24} width={14} height={20} fill={on('dresser_no') ? '#f59e0b' : '#64748b'} stroke="#334155" strokeWidth={1} rx={2} />
+          <polygon points={`${wMid - 7},${odBot + 24} ${wMid + 7},${odBot + 24} ${wMid},${odBot + 3}`} fill={on('dresser_no') ? '#fbbf24' : '#94a3b8'} stroke="#334155" strokeWidth={1} />
+          <circle cx={wMid} cy={odBot + 2} r={2.5} fill="#22d3ee" />
+          <text x={wMid + 12} y={odBot + 38} fill={tc('dresser_no')} fontSize="9" fontWeight={tw('dresser_no')}>싱글포인트 드레서</text>
         </g>
 
-        {/* 좌표축 (X 반경 위 / Z 폭 오른쪽) */}
+        {/* 좌표축 (+X 외경=아래 / +Z 폭=왼쪽) */}
         <g>
-          <line x1={392} y1={244} x2={392} y2={218} stroke="#0ea5e9" strokeWidth={1.6} />
-          <path d="M388,223 L392,216 L396,223" fill="none" stroke="#0ea5e9" strokeWidth={1.6} />
-          <text x={392} y={212} fill="#0ea5e9" fontSize="10" fontWeight={700} textAnchor="middle">+X(외경)</text>
-          <line x1={392} y1={244} x2={420} y2={244} stroke="#10b981" strokeWidth={1.6} />
-          <path d="M415,240 L422,244 L415,248" fill="none" stroke="#10b981" strokeWidth={1.6} />
-          <text x={426} y={247} fill="#10b981" fontSize="10" fontWeight={700}>+Z(폭)</text>
+          <line x1={408} y1={34} x2={408} y2={60} stroke="#0ea5e9" strokeWidth={1.6} />
+          <path d="M404,55 L408,62 L412,55" fill="none" stroke="#0ea5e9" strokeWidth={1.6} />
+          <text x={408} y={74} fill="#0ea5e9" fontSize="10" fontWeight={700} textAnchor="middle">+X(외경)</text>
+          <line x1={408} y1={34} x2={382} y2={34} stroke="#10b981" strokeWidth={1.6} />
+          <path d="M387,30 L380,34 L387,38" fill="none" stroke="#10b981" strokeWidth={1.6} />
+          <text x={376} y={37} fill="#10b981" fontSize="10" fontWeight={700} textAnchor="end">+Z(폭)</text>
         </g>
 
         {showGeo && (
           <g>
             {/* 휠 외경 */}
-            <text x={wL + 6} y={odTop - 5} fill="#64748b" fontSize="9" fontWeight={600}>휠 외경{d1v ? ` Ø${d1v}` : ''}</text>
-            {/* 총 드레싱량 */}
-            <line x1={wR + 10} y1={odTop} x2={wR + 10} y2={dressTop} stroke={sc('dress_total')} strokeWidth={sw2('dress_total')} />
-            <text x={wR + 14} y={(odTop + dressTop) / 2 + 4} fill={tc('dress_total')} fontSize="9" fontWeight={tw('dress_total')}>총 드레싱{d2v ? ` ${d2v}` : ''}</text>
+            <text x={wL + 6} y={odBot + 12} fill="#64748b" fontSize="9" fontWeight={600}>휠 외경{d1v ? ` Ø${d1v}` : ''}</text>
+            {/* 총 드레싱량 (외경, 세로) */}
+            <line x1={wR + 10} y1={dressBot} x2={wR + 10} y2={odBot} stroke={sc('dress_total')} strokeWidth={sw2('dress_total')} />
+            <text x={wR + 14} y={(dressBot + odBot) / 2 + 4} fill={tc('dress_total')} fontSize="9" fontWeight={tw('dress_total')}>총 드레싱{d2v ? ` ${d2v}` : ''}</text>
             {/* 1회 절입 (작은 단) */}
-            <line x1={wL - 10} y1={odTop} x2={wL - 10} y2={odTop + 7} stroke={sc('dress_depth')} strokeWidth={sw2('dress_depth')} />
-            <text x={wL - 12} y={odTop + 4} fill={tc('dress_depth')} fontSize="9" fontWeight={tw('dress_depth')} textAnchor="end">1회절입</text>
-            {/* 폭 오버런 (양끝) */}
-            <line x1={wL} y1={dressTop + 8} x2={wL - ovPx} y2={dressTop + 8} stroke={sc('over_run')} strokeWidth={sw2('over_run')} />
-            <line x1={wR} y1={dressTop + 8} x2={wR + ovPx} y2={dressTop + 8} stroke={sc('over_run')} strokeWidth={sw2('over_run')} />
-            <text x={wL - ovPx} y={dressTop + 20} fill={tc('over_run')} fontSize="9" fontWeight={tw('over_run')}>오버런{zs ? ` ${zs}` : ''}</text>
-            <text x={wR + ovPx} y={dressTop + 20} fill={tc('over_run')} fontSize="9" fontWeight={tw('over_run')} textAnchor="end">오버런</text>
-            {/* 안전거리 (드레서 접근 갭) */}
-            <line x1={wMid + 18} y1={42} x2={wMid + 18} y2={odTop} stroke={sc('clearance')} strokeWidth={sw2('clearance')} strokeDasharray="2 2" />
-            <text x={wMid + 22} y={54} fill={tc('clearance')} fontSize="9" fontWeight={tw('clearance')}>안전</text>
-            {/* 폭 트래버스 범위 화살표 */}
-            <line x1={wL - ovPx} y1={odTop - 16} x2={wR + ovPx} y2={odTop - 16} stroke="#10b981" strokeWidth={1.2} strokeDasharray="4 3" />
-            <path d={`M${wL - ovPx + 5},${odTop - 19} L${wL - ovPx},${odTop - 16} L${wL - ovPx + 5},${odTop - 13}`} fill="none" stroke="#10b981" strokeWidth={1.2} />
-            <path d={`M${wR + ovPx - 5},${odTop - 19} L${wR + ovPx},${odTop - 16} L${wR + ovPx - 5},${odTop - 13}`} fill="none" stroke="#10b981" strokeWidth={1.2} />
-            <text x={wMid} y={odTop - 20} fill="#10b981" fontSize="9" fontWeight={700} textAnchor="middle">폭 방향 트래버스(Z)</text>
+            <line x1={wL - 10} y1={odBot} x2={wL - 10} y2={odBot - 7} stroke={sc('dress_depth')} strokeWidth={sw2('dress_depth')} />
+            <text x={wL - 12} y={odBot - 2} fill={tc('dress_depth')} fontSize="9" fontWeight={tw('dress_depth')} textAnchor="end">1회절입</text>
+            {/* 폭 오버런 (양끝, 가로) */}
+            <line x1={wL} y1={dressBot - 8} x2={wL - ovPx} y2={dressBot - 8} stroke={sc('over_run')} strokeWidth={sw2('over_run')} />
+            <line x1={wR} y1={dressBot - 8} x2={wR + ovPx} y2={dressBot - 8} stroke={sc('over_run')} strokeWidth={sw2('over_run')} />
+            <text x={wL - ovPx} y={dressBot - 11} fill={tc('over_run')} fontSize="9" fontWeight={tw('over_run')}>오버런{zs ? ` ${zs}` : ''}</text>
+            <text x={wR + ovPx} y={dressBot - 11} fill={tc('over_run')} fontSize="9" fontWeight={tw('over_run')} textAnchor="end">오버런</text>
+            {/* 안전거리 (드레서 접근 갭, 세로) */}
+            <line x1={wMid - 18} y1={odBot} x2={wMid - 18} y2={odBot + 24} stroke={sc('clearance')} strokeWidth={sw2('clearance')} strokeDasharray="2 2" />
+            <text x={wMid - 22} y={odBot + 18} fill={tc('clearance')} fontSize="9" fontWeight={tw('clearance')} textAnchor="end">안전</text>
+            {/* 폭 트래버스 범위 화살표 (가로) */}
+            <line x1={wL - ovPx} y1={odBot + 16} x2={wR + ovPx} y2={odBot + 16} stroke="#10b981" strokeWidth={1.2} strokeDasharray="4 3" />
+            <path d={`M${wL - ovPx + 5},${odBot + 13} L${wL - ovPx},${odBot + 16} L${wL - ovPx + 5},${odBot + 19}`} fill="none" stroke="#10b981" strokeWidth={1.2} />
+            <path d={`M${wR + ovPx - 5},${odBot + 13} L${wR + ovPx},${odBot + 16} L${wR + ovPx - 5},${odBot + 19}`} fill="none" stroke="#10b981" strokeWidth={1.2} />
+            <text x={wMid} y={odBot + 28} fill="#10b981" fontSize="9" fontWeight={700} textAnchor="middle">폭 방향 트래버스(Z)</text>
           </g>
         )}
         {showCut && (
           <g>
-            {/* 트래버스 이송 */}
-            <line x1={wL} y1={odTop - 14} x2={wR} y2={odTop - 14} stroke={sc('traverse_feed')} strokeWidth={sw2('traverse_feed')} />
-            <text x={wMid} y={odTop - 18} fill={tc('traverse_feed')} fontSize="9" fontWeight={tw('traverse_feed')} textAnchor="middle">트래버스 이송</text>
-            {/* 절입 이송 (아래로) */}
-            <line x1={wMid - 26} y1={44} x2={wMid - 26} y2={odTop} stroke={sc('infeed_feed')} strokeWidth={sw2('infeed_feed')} />
-            <path d={`M${wMid - 29},${odTop - 5} L${wMid - 26},${odTop} L${wMid - 23},${odTop - 5}`} fill="none" stroke={sc('infeed_feed')} strokeWidth={sw2('infeed_feed')} />
-            <text x={wMid - 30} y={40} fill={tc('infeed_feed')} fontSize="9" fontWeight={tw('infeed_feed')} textAnchor="end">절입이송</text>
+            {/* 트래버스 이송 (가로) */}
+            <line x1={wL} y1={odBot + 10} x2={wR} y2={odBot + 10} stroke={sc('traverse_feed')} strokeWidth={sw2('traverse_feed')} />
+            {/* 절입 이송 (아래=외경 절입) */}
+            <line x1={wMid + 26} y1={odBot - 16} x2={wMid + 26} y2={odBot} stroke={sc('infeed_feed')} strokeWidth={sw2('infeed_feed')} />
+            <path d={`M${wMid + 23},${odBot - 5} L${wMid + 26},${odBot} L${wMid + 29},${odBot - 5}`} fill="none" stroke={sc('infeed_feed')} strokeWidth={sw2('infeed_feed')} />
+            <text x={wMid + 30} y={odBot - 8} fill={tc('infeed_feed')} fontSize="9" fontWeight={tw('infeed_feed')}>절입이송</text>
             {/* 무절입 스파크 */}
-            {(() => { const act = on('spark_pass'); return (<g><rect x={wR - 4} y={cax - 30} width={50} height={18} fill={act ? '#fde68a' : '#f1f5f9'} stroke={act ? '#f59e0b' : '#cbd5e1'} strokeWidth={act ? 2.5 : 1} /><text x={wR + 21} y={cax - 17} fill={act ? '#b45309' : '#64748b'} fontSize="9" fontWeight={act ? 800 : 600} textAnchor="middle">무절입</text></g>); })()}
+            {(() => { const act = on('spark_pass'); return (<g><rect x={wL} y={cax + 6} width={50} height={18} fill={act ? '#fde68a' : '#f1f5f9'} stroke={act ? '#f59e0b' : '#cbd5e1'} strokeWidth={act ? 2.5 : 1} /><text x={wL + 25} y={cax + 19} fill={act ? '#b45309' : '#64748b'} fontSize="9" fontWeight={act ? 800 : 600} textAnchor="middle">무절입</text></g>); })()}
             {/* 휠 주속 */}
-            <text x={wMid} y={(odTop + cax) / 2 + 60} fill={tc('dress_vc')} fontSize="9" fontWeight={tw('dress_vc')} textAnchor="middle">휠 회전(주속)</text>
+            <text x={wMid} y={(cax + odBot) / 2 - 38} fill={tc('dress_vc')} fontSize="9" fontWeight={tw('dress_vc')} textAnchor="middle">휠 회전(주속)</text>
           </g>
         )}
-        <text x={wMid} y={236} fill="#94a3b8" fontSize="8" textAnchor="middle">싱글포인트 드레서가 회전 휠 외주를 폭 방향으로 왕복하며 외경(X)을 절입 트루잉</text>
+        <text x={wMid} y={238} fill="#94a3b8" fontSize="8" textAnchor="middle">싱글포인트 드레서가 회전 휠 외주를 폭 방향으로 왕복하며 외경(X)을 절입 트루잉</text>
       </svg>
     );
   }

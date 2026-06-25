@@ -8,3 +8,4 @@ coverage/
 !.env.example
 preview/
 render_test.cjs
+_dresscheck.png
